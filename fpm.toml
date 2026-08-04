@@ -1,0 +1,13 @@
+name = "fortgen"
+version = "0.1.0"
+description = "Shared Fortran source-generation conventions for lazy-fortran code generators"
+author = "krystophny"
+license = "MIT"
+
+[build]
+auto-examples = false
+
+[fortran]
+implicit-external = false
+implicit-typing = false
+source-form = "free"
