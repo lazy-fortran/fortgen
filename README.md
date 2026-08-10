@@ -49,6 +49,12 @@ Nor is there a "generated kernel" type. fortsym's `kernel_spec_t` carries
 engine provenance, CSE results, and OpenMP/OpenACC annotations that fortad has
 no use for. That belongs to fortsym until something else needs it.
 
+## Principles
+
+The governing principle and the measurement contract that shape this stack are documented in
+[docs/principles.md](docs/principles.md), where the shared layer lives, so a
+decision can be checked against them rather than re-argued.
+
 ## Status
 
 fortad uses it. fortsym has an equivalent implementation in place and is not
