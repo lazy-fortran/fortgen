@@ -1,60 +1,71 @@
 # fortgen
 
-Shared conventions for the lazy-fortran tools that **generate Fortran source**.
+Shared target-neutral kernel IR and source-generation backend for the
+lazy-fortran toolchain.
 
-Today that is [fortsym](https://github.com/lazy-fortran/fortsym), which emits
-kernels from symbolic expressions, and
-[fortad](https://github.com/lazy-fortran/fortad), which emits derivative code
-from a differentiation IR. They emit from different representations, so their
-expression printers are properly separate. Everything *downstream* of the
-expression, though, they had each written independently and identically.
+FortGen is the neutral boundary between frontends and generated numerical
+leaves:
 
-## Why this exists
+```text
+FortSym expr_t -------\
+                       > fortgen.kernel_ir.v1 -> Fortran / CUDA
+real SymPy Expr ------/
+```
 
-This repository was not created on the suspicion that code might be shared. It
-was created after finding the same three non-obvious things solved twice, in
-the same way, for the same stated reasons:
+The public scalar IR is specified in
+[`spec/kernel-ir-v1.md`](spec/kernel-ir-v1.md). The Fortran API exposes the
+same node/operand representation through `fortgen_kernel_ir`; the Python
+package lowers ordinary `sympy.Expr` objects to the text interchange and
+invokes the same `fortgen-codegen` executable.
 
-- **A geometric-growth text buffer.** Both codebases carry a comment explaining
-  that building generated code with repeated `s = s // more` is quadratic and
-  becomes the dominant cost on a large kernel.
-- **Line-limit continuation.** Both break generated statements before the
-  column limit, both leave room for the ampersand and indentation, and both
-  discovered that a break must never land inside a token — a derivative chain
-  or an expanded polynomial passes 132 columns routinely, so this is a
-  correctness requirement, not formatting taste.
-- **A provenance banner.** Both stamp generated files with what produced them
-  and a "do not edit" line, because generated code that cannot be traced back
-  to its generator becomes unmaintainable the first time somebody edits it.
+Existing shared source-generation utilities remain available:
 
-Two independent implementations of the same subtle logic is the bar for
-extracting a shared abstraction. One would have been a guess.
+- `fortgen_buffer`: append-oriented geometric-growth text buffer;
+- `fortgen_layout`: token-safe Fortran line continuation;
+- `fortgen_banner`: provenance banners.
 
-## What is here
+The scalar emitter additionally owns stable target IDs, precision choices,
+identifier collision handling, source-level policies (small-power expansion,
+constant folding/division elimination, FMA shaping), and Fortran/CUDA spelling.
 
-| Module | Provides |
-|---|---|
-| `fortgen_buffer` | `buffer_t`: append-oriented text accumulation, geometric growth |
-| `fortgen_layout` | line-limit continuation that never splits a token, indentation |
-| `fortgen_banner` | provenance headers for generated files |
+## Python / SymPy
 
-## What is deliberately not here
+```python
+import sympy as sp
+from fortgen import kernel
 
-Expression printing. fortsym prints a hash-consed symbolic DAG; fortad prints a
-differentiation IR. Forcing those through one interface would produce an
-abstraction that fits neither, and the shared part — precedence and
-parenthesisation rules — is a dozen lines each.
+x, y = sp.symbols("x y", real=True)
+k = kernel({"f": sp.sin(x + y) + (x + y)**2}, name="demo")
+print(k.emit_fortran())
+```
 
-Nor is there a "generated kernel" type. fortsym's `kernel_spec_t` carries
-engine provenance, CSE results, and OpenMP/OpenACC annotations that fortad has
-no use for. That belongs to fortsym until something else needs it.
+The adapter is intentionally thin: SymPy owns symbolic mathematics; FortGen
+owns source generation.
 
-## Status
+## Pure Fortran
 
-fortad uses it. fortsym has an equivalent implementation in place and is not
-being disrupted to adopt this one; the migration path is documented in
-[docs/migration.md](docs/migration.md) and should be taken when fortsym's
-emitter is next touched for another reason.
+Fortran callers construct `kernel_ir_t` directly or use a frontend such as
+FortSym. No Python or SymPy runtime is required.
+
+## Build
+
+```console
+fpm test
+fpm install --prefix ~/.local
+```
+
+The installed `fortgen-codegen` command accepts:
+
+```console
+fortgen-codegen fortran kernel.fgir
+fortgen-codegen cuda kernel.fgir
+```
+
+## Compatibility
+
+FortAD continues to use the original buffer/layout/banner APIs. FortSym
+migration is deliberately done in a separate PR so existing code-generation
+outputs can be compared independently before the shared backend is promoted.
 
 ## Licence
 
