@@ -1,11 +1,17 @@
 name = "fortgen"
-version = "0.1.0"
-description = "Shared Fortran source-generation conventions for lazy-fortran code generators"
+version = "0.2.0"
+description = "Shared target-neutral kernel IR and Fortran/CUDA code generation for lazy-fortran"
 author = "krystophny"
 license = "MIT"
 
 [build]
 auto-examples = false
+auto-executables = false
+
+[[executable]]
+name = "fortgen-codegen"
+source-dir = "app"
+main = "fortgen_codegen.f90"
 
 [fortran]
 implicit-external = false
