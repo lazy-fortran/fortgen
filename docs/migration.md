@@ -1,44 +1,54 @@
-# Migrating an existing generator to fortgen
+# Migrating generators to FortGen
 
-## fortad
+FortGen now owns two distinct shared layers:
 
-Done. `fortad_emit` uses `fortgen_buffer`, `fortgen_layout`, and
-`fortgen_banner`; `fortad_text` is gone.
+1. the long-standing source-generation utilities (`fortgen_buffer`,
+   `fortgen_layout`, `fortgen_banner`);
+2. the stable scalar kernel contract (`fortgen.kernel_ir.v1`) and ordinary
+   Fortran/CUDA scalar emitter.
 
-## fortsym
+## FortAD
 
-Not done, and deliberately not forced.
+FortAD uses the shared buffer/layout/banner utilities. Its differentiation IR
+is intentionally not forced through the scalar kernel IR: it represents
+imperative source transformation, control flow, taped reverse-mode state, and
+other concepts that are not scalar symbolic DAGs. If a future FortAD product
+naturally lowers to the scalar kernel IR, that should be added at that
+boundary rather than by replacing FortAD's own IR.
 
-fortsym's emitter works, is tested against a 384-derivation corpus, and is not
-currently being touched. Rewriting a working emitter to adopt an identical
-implementation buys nothing today and risks a regression in the one place where
-a subtle bug is hardest to notice - generated code that compiles but computes
-something slightly different.
+## FortSym
 
-Take this migration when `fortsym_kernel` is next opened for another reason.
+The scalar backend migration is implemented in the companion FortSym PR.
+FortSym keeps ownership of:
 
-### What maps onto what
+- `expr_t` and its hash-consed symbolic arena;
+- CAS engines and multi-engine adjudication;
+- symbolic lowering from `expr_t` to its established kernel DAG;
+- typed, Taylor, rigorous-enclosure, table, and other expression-aware
+  generators.
 
-| fortsym | fortgen |
-|---|---|
-| `strbuf_t` in `fortsym_string` | `buffer_t` in `fortgen_buffer` |
-| `LINE_LIMIT` and its statement breaker | `put_wrapped` in `fortgen_layout` |
-| `append_banner` | `put_banner` in `fortgen_banner` |
+At the ordinary scalar Fortran/CUDA emission boundary,
+`fortsym_fortgen_adapter` converts FortSym's established kernel DAG to
+FortGen's shared scalar IR, then calls the same FortGen emitter used by the
+direct SymPy frontend. Existing FortSym public types remain source-compatible.
 
-### One difference to reconcile first
+This staged adapter is deliberate. It lets FortSym's existing generated-source
+and executable-oracle tests compare the shared backend against the previous
+behavior before any redundant FortSym emitter implementation is deleted.
 
-fortsym breaks lines at a set of operator positions and has a special case
-forbidding a break between the two asterisks of `**`. fortgen breaks only at
-whitespace, which makes that special case unnecessary - a break can never land
-inside any token.
+## Direct SymPy
 
-That is a stricter rule, so fortgen will sometimes wrap earlier than fortsym
-does. Before migrating, check the committed generated kernels in
-`fortsym-bench` for line-count churn and regenerate them in the same commit, so
-the diff is reviewable as formatting rather than mixed with a behaviour change.
+The Python package in `python/` translates ordinary `sympy.Expr` trees
+directly to `fortgen.kernel_ir.v1` and invokes `fortgen-codegen`. It owns no
+simplification, differentiation, or other CAS algorithms.
 
-### What not to move
+Thus the two Python routes are intentionally independent above the shared
+backend:
 
-`kernel_spec_t` stays in fortsym. It carries engine provenance, CSE results,
-and OpenMP/OpenACC annotations that no other generator has asked for. Moving it
-would make fortgen a home for one project's concepts rather than shared ones.
+```text
+real SymPy Expr --------------------> FortGen IR -> FortGen emitter
+fortsym.sympy -> FortSym expr_t ----> FortGen IR -> FortGen emitter
+```
+
+Their common subset is suitable for differential testing without maintaining
+two code generators.
