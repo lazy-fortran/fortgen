@@ -16,11 +16,16 @@ jobs:
       - name: Install gfortran
         run: sudo apt-get update && sudo apt-get install -y gfortran
       - uses: fortran-lang/setup-fpm@v7
-      - name: Build and test Fortran
+      - name: Build and test Fortran with fpm
         run: |
           fpm build
           fpm test
           fpm install --prefix "$PWD/.local"
+      - name: Build and test Fortran with CMake
+        run: |
+          cmake -S . -B cmake-build -DCMAKE_BUILD_TYPE=Debug
+          cmake --build cmake-build -j
+          ctest --test-dir cmake-build --output-on-failure
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
