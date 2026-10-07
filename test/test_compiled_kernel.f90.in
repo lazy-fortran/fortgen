@@ -1,5 +1,6 @@
 program test_compiled_kernel
     use, intrinsic :: iso_fortran_env, only: real64, real128
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
     integer :: i
     real(real64) :: x, y, f, g
@@ -16,6 +17,8 @@ program test_compiled_kernel
         x = real(i, real64)/8.0_real64
         y = real(17 - i, real64)/16.0_real64
         call behavior_kernel(x, y, f, g)
+        if (.not. ieee_is_finite(f)) error stop "non-finite f"
+        if (.not. ieee_is_finite(g)) error stop "non-finite g"
         xr = real(x, real128)
         yr = real(y, real128)
         reference_f = sin(xr*yr)/(1.0_real128 + xr*xr)
