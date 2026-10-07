@@ -15,7 +15,7 @@
 
 | Stage | Issue / existing work | Gate |
 |---|---|---|
-| H0 | Scalar backend and companion FortSym adapter integrated | Independent compiled numerical oracles passed; final ref cleanup controller-owned |
+| H0 | Scalar backend and companion FortSym adapter integrated | Independent compiled numerical oracles passed; finished refs removed after preservation |
 | K0 | Remaining consumer compatibility [#2](https://github.com/lazy-fortran/fortgen/issues/2) | Fresh generated FortNum consumer gate; retain explicit lowering ownership |
 | K1 | Targets complete [#4](https://github.com/lazy-fortran/fortgen/issues/4) | Descriptor/serialization and target decorations verified; device evidence separately scoped |
 | L0 | Layering complete [#5](https://github.com/lazy-fortran/fortgen/issues/5) | Useful #6 contracts integrated with unsupported historical claims removed |
@@ -59,8 +59,9 @@
   [#3](https://github.com/lazy-fortran/fortgen/issues/3),
   [#8](https://github.com/lazy-fortran/fortgen/issues/8) and
   [#9](https://github.com/lazy-fortran/fortgen/issues/9) retain unfinished work.
-- Exact Expr IR and full derivation replay remain planned. Obsolete branch
-  and worktree removal belongs to the integration controller.
+- Exact Expr IR and full derivation replay remain planned. Finished branches
+  and obsolete worktrees were removed after preserving exact refs/evidence;
+  only the clean main checkout remains, with no open PRs.
 
 ## Artifacts
 
