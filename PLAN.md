@@ -15,10 +15,10 @@
 
 | Stage | Issue / existing work | Gate |
 |---|---|---|
-| H0 | Review #6/#7 and companion FortSym #77 | Reconcile current main; independent compiled numerical oracles |
-| K0 | Shared backend [#2](https://github.com/lazy-fortran/fortgen/issues/2) | Preserve consumer compatibility and explicit lowering ownership |
-| K1 | Targets [#4](https://github.com/lazy-fortran/fortgen/issues/4) | Verify implemented descriptor/serialization and target decoration |
-| L0 | Layering [#5](https://github.com/lazy-fortran/fortgen/issues/5) | Revise #6 unsupported historical performance/rewrite claims |
+| H0 | Scalar backend and companion FortSym adapter integrated | Independent compiled numerical oracles passed; final ref cleanup controller-owned |
+| K0 | Remaining consumer compatibility [#2](https://github.com/lazy-fortran/fortgen/issues/2) | Fresh generated FortNum consumer gate; retain explicit lowering ownership |
+| K1 | Targets complete [#4](https://github.com/lazy-fortran/fortgen/issues/4) | Descriptor/serialization and target decorations verified; device evidence separately scoped |
+| L0 | Layering complete [#5](https://github.com/lazy-fortran/fortgen/issues/5) | Useful #6 contracts integrated with unsupported historical claims removed |
 | E0 | Exact Expr IR [#8](https://github.com/lazy-fortran/fortgen/issues/8) | Exact arithmetic, assumptions/scope, deterministic serialization, refusal tests |
 | E1 | Independent adapters [#9](https://github.com/lazy-fortran/fortgen/issues/9) | E0 plus semantic oracles and explicit numerical lowering |
 | S0 | Statement extension [#3](https://github.com/lazy-fortran/fortgen/issues/3) | Actual imperative consumer/rejection evidence before adding nodes |
@@ -39,23 +39,28 @@
 - Migration must preserve tested consumers and record any deliberate semantic
   change. Exact structure equality is distinct from mathematical equivalence.
 
-## Hygiene status
+## Verified status
 
-- Inspected main: `ea422bb282ba26dd39341c3f96f727d5892a8ede`.
-- PR #7 at `02a63c3c432fe660e4bdf0c555da403870b36dd3` supplies the scalar backend.
-  Native CMake/CTest checks include an emitted/compiled real128 oracle; optional
-  SymPy frontend tests also compile emitted code against independent values.
-- Open PR #6 at `a118158227571c0397ebe23990f86e996e092877` contains useful layering
-  documentation. [docs/principles.md](docs/principles.md) retains its useful
-  contracts with unsupported historical claims removed; promote that revision
-  before closing the superseded PR and issue #5.
-- Both remote feature branches remain protected until useful content is on
-  main or an explicit evidence-based disposition is recorded.
-- [#1](https://github.com/lazy-fortran/fortgen/issues/1) is a tracker; PLAN owns
-  order and atomic issues own remaining work. Close the tracker after its
-  references/disposition are updated, without claiming unfinished work done.
-- Existing issues #2–5 stay open until their acceptance criteria are checked
-  against integrated main. This inventory is not completed cleanup.
+- Verified source base: `eca530ed783f41e9343493f9d4173cc149a05ec9`.
+- [PR #7](https://github.com/lazy-fortran/fortgen/pull/7) is integrated; superseded
+  [PR #6](https://github.com/lazy-fortran/fortgen/pull/6) is closed after useful
+  layering contracts were retained in [docs/principles.md](docs/principles.md).
+- Native CMake/CTest: 2 passed, including 65 compiled real128 oracle samples.
+  Optional ordinary-SymPy frontend: 2 passed, including 17 compiled samples.
+- Four serialized Fortran target profiles passed independent host-compiled
+  checks. Host compilation alone does not establish OpenMP/OpenACC offload.
+- Opt-in [CUDA device gate](test/device/README.md): 3 CTest tests passed with
+  CUDA 13.4, GCC 14 and an RTX 5060 Ti, including 17 finite device samples.
+  CUDA Max/Min remain explicit refusals.
+- Issues [#1](https://github.com/lazy-fortran/fortgen/issues/1),
+  [#4](https://github.com/lazy-fortran/fortgen/issues/4) and
+  [#5](https://github.com/lazy-fortran/fortgen/issues/5) are closed with recorded
+  dispositions. Open issues [#2](https://github.com/lazy-fortran/fortgen/issues/2),
+  [#3](https://github.com/lazy-fortran/fortgen/issues/3),
+  [#8](https://github.com/lazy-fortran/fortgen/issues/8) and
+  [#9](https://github.com/lazy-fortran/fortgen/issues/9) retain unfinished work.
+- Exact Expr IR and full derivation replay remain planned. Obsolete branch
+  and worktree removal belongs to the integration controller.
 
 ## Artifacts
 
