@@ -1,0 +1,26 @@
+fortgen.kernel_ir.v1
+kernel behavior_kernel
+precision real64
+target fortran_cpu
+arg x
+arg y
+out f 11
+out g 17
+node 1 symbol x
+node 2 symbol y
+node 3 literal 2.00000000000000000e+00
+node 4 literal 1.00000000000000000e+00
+node 5 literal -1.00000000000000000e+00
+node 6 pow 2 1 3
+node 7 add 2 4 6
+node 8 pow 2 7 5
+node 9 mul 2 1 2
+node 10 function sin 1 9
+node 11 mul 2 8 10
+node 12 literal 0.00000000000000000e+00
+node 13 function Max 2 12 1
+node 14 function Min 2 2 5
+node 15 literal 3.00000000000000000e+00
+node 16 pow 2 1 15
+node 17 add 3 13 14 16
+end

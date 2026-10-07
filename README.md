@@ -1,19 +1,18 @@
 # fortgen
 
-Shared conventions for the lazy-fortran tools that **generate Fortran source**.
+Target-neutral scalar kernel IR and source generation for lazy-fortran.
 
 [PLAN.md](PLAN.md) records the reviewed work order for extending FortGen to a
-neutral expression/computation IR and code-generation boundary. Current main
-still provides the text utilities below; proposed IRs are not shipped here yet.
+neutral expression/computation IR and code-generation boundary. Scalar Kernel IR
+and Fortran/CUDA leaf emission are available; exact mathematical Expr IR remains
+planned work.
 Layer ownership and evidence requirements are in
 [docs/principles.md](docs/principles.md).
 
-Today that is [fortsym](https://github.com/lazy-fortran/fortsym), which emits
-kernels from symbolic expressions, and
-[fortad](https://github.com/lazy-fortran/fortad), which emits derivative code
-from a differentiation IR. They emit from different representations, so their
-expression printers are properly separate. Everything *downstream* of the
-expression, though, they had each written independently and identically.
+FortSym lowers symbolic expressions to the shared computation boundary. The
+optional ordinary-SymPy frontend feeds the same backend without importing
+FortSym. FortAD uses the text utilities; imperative IR lowering remains separate
+work. Frontends retain algebra, assumptions and source-language semantics.
 
 ## Motivation
 
@@ -43,24 +42,34 @@ extracting a shared abstraction. One would have been a guess.
 | `fortgen_buffer` | `buffer_t`: append-oriented text accumulation, geometric growth |
 | `fortgen_layout` | line-limit continuation that never splits a token, indentation |
 | `fortgen_banner` | provenance headers for generated files |
+| `fortgen_kernel_ir` | topologically ordered scalar computation DAG |
+| `fortgen_kernel_emit` | Fortran and CUDA leaf source emission |
+| `fortgen_kernel_target`, `fortgen_precision` | target and precision descriptors |
+| `fortgen_ir_text` | versioned scalar computation serialization |
 
 ## Current scope boundaries
 
-Expression printing. fortsym prints a hash-consed symbolic DAG; fortad prints a
-differentiation IR. Forcing those through one interface would produce an
-abstraction that fits neither, and the shared part — precedence and
-parenthesisation rules — is a dozen lines each.
-
-Nor is there a "generated kernel" type. fortsym's `kernel_spec_t` carries
-engine provenance, CSE results, and OpenMP/OpenACC annotations that fortad has
-no use for. That belongs to fortsym until something else needs it.
+- [Kernel IR v1](spec/kernel-ir-v1.md) contains binary64 numerical literals.
+  It does not preserve exact mathematical expressions, assumptions or histories.
+- FortSym's public symbolic/kernel owners remain in FortSym; its adapter
+  transfers numerical computation and explicit emission policies.
+- No scheduling, launch geometry, residency or application physics is owned
+  here. CUDA source emission alone establishes no device execution result.
 
 ## Status
 
-fortad uses it. fortsym has an equivalent implementation in place and is not
-being disrupted to adopt this one; the migration path is documented in
-[docs/migration.md](docs/migration.md) and should be taken when fortsym's
-emitter is next touched for another reason.
+Build and run the registered native oracle:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+`fortgen-codegen fortran INPUT.fgir OUTPUT.f90` emits a scalar leaf. The native
+compiled oracle compares emitted values against independent real128 formulas.
+Optional direct-SymPy examples and requirements are in [python/README.md](python/README.md).
+Migration ownership is in [docs/migration.md](docs/migration.md).
 
 ## Licence
 

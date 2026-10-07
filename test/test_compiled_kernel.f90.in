@@ -1,0 +1,30 @@
+program test_compiled_kernel
+    use, intrinsic :: iso_fortran_env, only: real64, real128
+    implicit none
+    integer :: i
+    real(real64) :: x, y, f, g
+    real(real128) :: xr, yr, reference_f, reference_g, tolerance
+    interface
+        subroutine behavior_kernel(x, y, f, g)
+            import real64
+            real(real64), intent(in) :: x, y
+            real(real64), intent(out) :: f, g
+        end subroutine behavior_kernel
+    end interface
+
+    do i = -32, 32
+        x = real(i, real64)/8.0_real64
+        y = real(17 - i, real64)/16.0_real64
+        call behavior_kernel(x, y, f, g)
+        xr = real(x, real128)
+        yr = real(y, real128)
+        reference_f = sin(xr*yr)/(1.0_real128 + xr*xr)
+        reference_g = max(0.0_real128, xr) + min(yr, -1.0_real128) + xr*xr*xr
+        tolerance = 32.0_real128*real(epsilon(x), real128)
+        if (abs(real(f, real128) - reference_f) > &
+            tolerance*max(1.0_real128, abs(reference_f))) error stop "f mismatch"
+        if (abs(real(g, real128) - reference_g) > &
+            tolerance*max(1.0_real128, abs(reference_g))) error stop "g mismatch"
+    end do
+    print *, "compiled kernel: 65 independent real128 samples passed"
+end program test_compiled_kernel

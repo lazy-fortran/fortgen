@@ -2,12 +2,12 @@
 
 ## Scope
 
-- Main currently owns shared source text utilities.
-- [PR #7](https://github.com/lazy-fortran/fortgen/pull/7) proposes the shared
-  scalar Kernel IR, Fortran/CUDA emission and independent SymPy frontend.
+- Shared text utilities, scalar Kernel IR, Fortran/CUDA leaf emission and an
+  independent SymPy frontend are integrated from
+  [PR #7](https://github.com/lazy-fortran/fortgen/pull/7).
 - Expand incrementally toward a target-neutral expression/computation boundary.
   The proposed exact Expr IR is additional reviewed work; it is not supplied
-  by PR #7's binary64 numerical literals.
+  by the scalar backend's binary64 numerical literals.
 - Keep direct SymPy input independent of FortSym, and the native path free of
   Python requirements. Neither frontend owns the neutral contract.
 
@@ -42,8 +42,9 @@
 ## Hygiene status
 
 - Inspected main: `ea422bb282ba26dd39341c3f96f727d5892a8ede`.
-- Open PR #7 at `02a63c3c432fe660e4bdf0c555da403870b36dd3` contains useful code;
-  historical CI passed. Fresh validation and current integration remain open.
+- PR #7 at `02a63c3c432fe660e4bdf0c555da403870b36dd3` supplies the scalar backend.
+  Native CMake/CTest checks include an emitted/compiled real128 oracle; optional
+  SymPy frontend tests also compile emitted code against independent values.
 - Open PR #6 at `a118158227571c0397ebe23990f86e996e092877` contains useful layering
   documentation. [docs/principles.md](docs/principles.md) retains its useful
   contracts with unsupported historical claims removed; promote that revision

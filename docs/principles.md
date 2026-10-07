@@ -49,8 +49,8 @@
 
 ## Incremental scope
 
-- Current main supplies text utilities; proposed IR/backend work is listed in
-  [PLAN.md](../PLAN.md). Plans do not establish shipped capabilities.
+- Text utilities and scalar Kernel IR/backend are implemented. Exact Expr IR
+  and broader computation work remain in [PLAN.md](../PLAN.md).
 - Statements/control flow need an actual consumer and independent execution
   oracle. A statement extension does not introduce a scheduling language.
 - Canonical serialization supports reproducibility and structural comparisons;
