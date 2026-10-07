@@ -13,6 +13,10 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     set(FORTGEN_IS_STANDALONE ON)
 endif()
 option(FORTGEN_BUILD_TESTING "Build FortGen tests" ${FORTGEN_IS_STANDALONE})
+option(FORTGEN_BUILD_CUDA_TESTING "Build the opt-in CUDA device oracle" OFF)
+if(FORTGEN_BUILD_CUDA_TESTING AND NOT FORTGEN_BUILD_TESTING)
+    message(FATAL_ERROR "FORTGEN_BUILD_CUDA_TESTING requires FORTGEN_BUILD_TESTING")
+endif()
 
 add_library(fortgen)
 add_library(fortgen::fortgen ALIAS fortgen)
@@ -54,6 +58,24 @@ if(FORTGEN_BUILD_TESTING)
         ${CMAKE_CURRENT_BINARY_DIR}/test_compiled_kernel.f90
         ${CMAKE_CURRENT_BINARY_DIR}/behavior_kernel.f90)
     add_test(NAME compiled_kernel COMMAND test_compiled_kernel)
+    if(FORTGEN_BUILD_CUDA_TESTING)
+        enable_language(CUDA)
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/behavior_kernel.cuh
+            COMMAND $<TARGET_FILE:fortgen-codegen> cuda
+                ${CMAKE_CURRENT_SOURCE_DIR}/test/device/fixture.fgir
+                ${CMAKE_CURRENT_BINARY_DIR}/behavior_kernel.cuh
+            DEPENDS fortgen-codegen test/device/fixture.fgir
+            VERBATIM)
+        add_executable(test_cuda_kernel
+            test/device/test_cuda_kernel.cu
+            ${CMAKE_CURRENT_BINARY_DIR}/behavior_kernel.cuh)
+        target_include_directories(test_cuda_kernel PRIVATE
+            ${CMAKE_CURRENT_BINARY_DIR})
+        set_target_properties(test_cuda_kernel PROPERTIES
+            CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+        add_test(NAME cuda_kernel COMMAND test_cuda_kernel)
+    endif()
 endif()
 
 install(TARGETS fortgen fortgen-codegen
