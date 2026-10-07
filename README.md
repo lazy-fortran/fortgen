@@ -2,6 +2,12 @@
 
 Shared conventions for the lazy-fortran tools that **generate Fortran source**.
 
+[PLAN.md](PLAN.md) records the reviewed work order for extending FortGen to a
+neutral expression/computation IR and code-generation boundary. Current main
+still provides the text utilities below; proposed IRs are not shipped here yet.
+Layer ownership and evidence requirements are in
+[docs/principles.md](docs/principles.md).
+
 Today that is [fortsym](https://github.com/lazy-fortran/fortsym), which emits
 kernels from symbolic expressions, and
 [fortad](https://github.com/lazy-fortran/fortad), which emits derivative code
@@ -9,7 +15,7 @@ from a differentiation IR. They emit from different representations, so their
 expression printers are properly separate. Everything *downstream* of the
 expression, though, they had each written independently and identically.
 
-## Why this exists
+## Motivation
 
 This repository was not created on the suspicion that code might be shared. It
 was created after finding the same three non-obvious things solved twice, in
@@ -30,7 +36,7 @@ the same way, for the same stated reasons:
 Two independent implementations of the same subtle logic is the bar for
 extracting a shared abstraction. One would have been a guess.
 
-## What is here
+## Modules
 
 | Module | Provides |
 |---|---|
@@ -38,7 +44,7 @@ extracting a shared abstraction. One would have been a guess.
 | `fortgen_layout` | line-limit continuation that never splits a token, indentation |
 | `fortgen_banner` | provenance headers for generated files |
 
-## What is deliberately not here
+## Current scope boundaries
 
 Expression printing. fortsym prints a hash-consed symbolic DAG; fortad prints a
 differentiation IR. Forcing those through one interface would produce an
