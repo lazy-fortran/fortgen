@@ -84,7 +84,74 @@ program test_kernel_ir
 
     call delete_file("fortgen-test.fgir")
 
+    call check_long_statements_continue()
+
 contains
+
+    subroutine check_long_statements_continue()
+        !! A leaf with many arguments and a long sum must stay within the
+        !! column limit and still be accepted by a Fortran compiler.
+        integer, parameter :: n = 40
+        type(kernel_ir_t) :: wide
+        type(kernel_emit_spec_t) :: wide_spec
+        type(str_t) :: wide_source
+        character(:), allocatable :: text, why
+        character(16) :: name
+        integer :: k, start, stop, body, unit, status
+
+        call kernel_ir_allocate(wide, n + 1, n, 1)
+        allocate(wide_spec%args(n), wide_spec%outputs(1))
+        do k = 1, n
+            write(name, "(a,i0)") "argument_", k
+            wide%nodes(k)%operation = IR_SYMBOL
+            wide%nodes(k)%name = str(trim(name))
+            wide%nodes(k)%first_operand = 1
+            wide%operands(k) = k
+            wide_spec%args(k) = str(trim(name))
+        end do
+        wide%nodes(n + 1)%operation = IR_ADD
+        wide%nodes(n + 1)%first_operand = 1
+        wide%nodes(n + 1)%n_operands = n
+        wide%outputs(1) = n + 1
+        wide_spec%name = str("wide_sum_kernel")
+        wide_spec%outputs = [str("total")]
+        wide_spec%temp_prefix = str("t")
+        wide_spec%target = TARGET_FORTRAN_CPU
+        wide_spec%producer = str("fortgen")
+        wide_spec%generator = str("test_kernel_ir")
+        wide_spec%regenerate_command = str("fpm test")
+
+        wide_source = emit_fortran_kernel_ir(wide, wide_spec, ok, message)
+        call require(ok, message)
+        text = chars(wide_source)
+        call require(index(text, " &"//new_line("a")) > 0, &
+            "long statement was not continued")
+        start = 1
+        do while (start <= len(text))
+            stop = index(text(start:), new_line("a"))
+            if (stop == 0) stop = len(text) - start + 2
+            stop = start + stop - 1
+            body = verify(text(start:stop - 1), " ")
+            if (body > 0) then
+                if (text(start + body - 1:start + body - 1) /= "!") then
+                    why = "line exceeds 88 columns: "//text(start:stop - 1)
+                    call require(stop - start <= 88, why)
+                end if
+            end if
+            start = stop + 1
+        end do
+
+        open(newunit=unit, file="fortgen-wide.f90", status="replace", &
+            action="write")
+        write(unit, "(a)") text
+        close(unit)
+        call execute_command_line("gfortran -std=f2018 -fsyntax-only " // &
+            "-Werror=line-truncation fortgen-wide.f90", exitstat=status)
+        call delete_file("fortgen-wide.f90")
+        ! 127: no gfortran on this host; the column check above still ran.
+        if (status /= 127) call require(status == 0, &
+            "continued leaf does not compile")
+    end subroutine check_long_statements_continue
 
     subroutine require(condition, why)
         logical, intent(in) :: condition

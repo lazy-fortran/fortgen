@@ -43,6 +43,8 @@ contains
 
         start = 1
         do
+            ! Continuation lines carry four more columns of indentation.
+            if (start > 1) room = max(16, cols - len(indent) - 4)
             remaining = len(line) - start + 1
             if (remaining <= room) then
                 call b%line(indent//"    "//line(start:))
