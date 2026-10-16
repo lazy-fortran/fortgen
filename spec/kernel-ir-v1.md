@@ -57,3 +57,21 @@ into this IR, but it must not silently reimplement simplification or
 differentiation. A FortSym adapter similarly lowers an already-established
 `expr_t` DAG. This keeps the IR a neutral boundary and makes differential
 testing meaningful.
+
+## Small integer powers
+
+The existing `small_power_limit` source policy expands exact literal integer
+powers of magnitude at most its limit (default three). Zero disables this
+expansion. Negative powers multiply typed reciprocals, so an overflowing
+positive denominator power does not erase a representable reciprocal result.
+Noninteger exponents, including adjacent binary64 values, and powers outside
+the limit retain the target's general power operation.
+
+This is floating-point source shaping, not faithful rounding of a complete
+rational expression. In particular, `a * x**(-1)` remains multiply-after-
+reciprocal; it is not fused to `a / x`. The intermediate reciprocal can overflow
+although a complete quotient would be finite. Consumers retain their arithmetic
+range/error contract. Mathematical negative powers require a nonzero base;
+IEEE zero/infinity/NaN classifications and signed zeros are checked separately
+without making a finite mathematical claim at a pole. Rigorous enclosure
+emission has its own runtime contract and is not changed by this policy.

@@ -440,6 +440,12 @@ contains
             value = 0
             return
         end if
+        if (.not. ieee_is_finite(real_value) .or. &
+                abs(real_value) > real(huge(value), dp)) then
+            literal_integer = .false.
+            value = 0
+            return
+        end if
         value = nint(real_value)
         literal_integer = real(value, dp) == real_value
     end function literal_integer
@@ -922,6 +928,7 @@ contains
         type(strbuf_t) :: b
         character(:), allocatable :: name, rendered_child
         integer :: k, operand, exponent
+        logical :: integer_power
 
         ok = .false.
         message = ""
@@ -962,9 +969,26 @@ contains
             text = chars(b%to_str())
         case (IR_POW)
             operand = ir%operands(ir%nodes(index)%first_operand)
-            if (policy%small_power_limit > 0 .and. &
-                literal_integer(ir, ir%operands(ir%nodes(index)%first_operand + 1), &
-                exponent) .and. exponent >= 2 .and. &
+            integer_power = literal_integer(ir, &
+                ir%operands(ir%nodes(index)%first_operand + 1), exponent)
+            ! Preserve the integer power's real domain and IEEE signs without
+            ! a general libm/libdevice power. Form the reciprocal first: the
+            ! denominator square could overflow even when x**(-2) is nonzero.
+            if (policy%small_power_limit > 0 .and. integer_power .and. exponent < 0 .and. &
+                exponent >= -policy%small_power_limit) then
+                call b%append("(")
+                do k = 1, -exponent
+                    if (k > 1) call b%append(" * ")
+                    call b%append("("//literal_text(1.0_dp, backend, precision)//" / ")
+                    call b%append(operand_reference(ir, operand, prefix, backend, precision))
+                    call b%append(")")
+                end do
+                call b%append(")")
+                text = chars(b%to_str())
+                ok = .true.
+                return
+            end if
+            if (policy%small_power_limit > 0 .and. integer_power .and. exponent >= 2 .and. &
                 exponent <= policy%small_power_limit) then
                 call b%append("(")
                 do k = 1, exponent

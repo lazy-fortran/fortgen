@@ -83,6 +83,7 @@ program test_kernel_ir
         index(chars(cuda_source), "*") > 0, "missing CUDA arithmetic")
 
     call delete_file("fortgen-test.fgir")
+    call small_power_policy()
 
     call check_long_statements_continue()
 
@@ -152,6 +153,42 @@ contains
         if (status /= 127) call require(status == 0, &
             "continued leaf does not compile")
     end subroutine check_long_statements_continue
+
+    subroutine small_power_policy()
+        type(kernel_ir_t) :: powers
+        type(kernel_emit_spec_t) :: power_spec
+        type(str_t) :: text
+        real(kind(1.0d0)), parameter :: exponents(*) = [-1.0d0, -2.0d0, -3.0d0, &
+            -4.0d0, -1.0000000000000002d0, -0.5d0, 1.0d100]
+        integer :: i
+
+        call kernel_ir_allocate(powers, 3, 2, 1)
+        powers%nodes(1)%operation = IR_SYMBOL
+        powers%nodes(1)%name = str("x")
+        powers%nodes(2)%operation = IR_LITERAL
+        powers%nodes(3)%operation = IR_POW
+        powers%nodes(3)%first_operand = 1
+        powers%nodes(3)%n_operands = 2
+        powers%operands = [1, 2]
+        powers%outputs = [3]
+        power_spec%name = str("power_leaf")
+        power_spec%args = [str("x")]
+        power_spec%outputs = [str("value")]
+        do i = 1, size(exponents)
+            powers%nodes(2)%value = exponents(i)
+            text = emit_cuda_device_ir(powers, power_spec, ok, message)
+            call require(ok, message)
+            ! The emitter's public source policy must recognize exact integers,
+            ! not rounded neighbors, and honor the configured magnitude limit.
+            call require((index(chars(text), "pow(") == 0) .eqv. (i <= 3), &
+                "small-power exactness/limit changed")
+        end do
+        powers%nodes(2)%value = -1.0d0
+        power_spec%policy%small_power_limit = 0
+        text = emit_cuda_device_ir(powers, power_spec, ok, message)
+        call require(ok, message)
+        call require(index(chars(text), "pow(") > 0, "disabled policy expanded reciprocal")
+    end subroutine small_power_policy
 
     subroutine require(condition, why)
         logical, intent(in) :: condition

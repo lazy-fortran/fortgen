@@ -1,0 +1,25 @@
+fortgen.kernel_ir.v1
+kernel reciprocal_kernel
+precision real64
+target fortran_cpu
+arg x
+arg dx
+arg seed
+out value 5
+out square 7
+out cube 9
+out tangent 11
+out adjoint 12
+node 1 symbol x
+node 2 symbol dx
+node 3 symbol seed
+node 4 literal -1.00000000000000000e+00
+node 5 pow 2 1 4
+node 6 literal -2.00000000000000000e+00
+node 7 pow 2 1 6
+node 8 literal -3.00000000000000000e+00
+node 9 pow 2 1 8
+node 10 mul 2 4 7
+node 11 mul 2 2 10
+node 12 mul 2 3 10
+end
