@@ -1,0 +1,41 @@
+fortgen.kernel_ir.v1
+kernel hermite_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk
+precision real64
+target fortran_cpu
+arg coordinate_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+arg left_value_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+arg right_value_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+arg left_slope_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+arg right_slope_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+out interpolated_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 25
+out fourth_power_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 26
+out scaled_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 28
+node 1 symbol coordinate_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+node 2 symbol left_value_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+node 3 symbol right_value_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+node 4 symbol left_slope_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+node 5 symbol right_slope_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+node 6 literal 2.00000000000000000e+00
+node 7 literal 3.00000000000000000e+00
+node 8 literal -3.00000000000000000e+00
+node 9 literal -2.00000000000000000e+00
+node 10 literal -1.00000000000000000e+00
+node 11 literal 4.00000000000000000e+00
+node 12 pow 2 1 6
+node 13 pow 2 1 7
+node 14 mul 2 7 3
+node 15 mul 2 8 2
+node 16 mul 2 9 4
+node 17 mul 2 10 5
+node 18 add 4 14 15 16 17
+node 19 mul 2 6 2
+node 20 mul 2 9 3
+node 21 add 4 19 20 4 5
+node 22 mul 2 18 12
+node 23 mul 2 21 13
+node 24 mul 2 4 1
+node 25 add 4 2 24 22 23
+node 26 pow 2 1 11
+node 27 literal -1.23456789012345000e-120
+node 28 mul 2 27 1
+end
