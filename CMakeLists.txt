@@ -83,6 +83,24 @@ if(FORTGEN_BUILD_TESTING)
             -ffree-line-length-132 -Werror=line-truncation)
     endif()
     add_test(NAME linewrap_kernel COMMAND test_linewrap_kernel)
+    add_executable(generate_temporary_name_fixture
+        test/generate_temporary_name_fixture.f90)
+    target_link_libraries(generate_temporary_name_fixture PRIVATE fortgen)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/temporary_name_kernel.f90
+        COMMAND $<TARGET_FILE:generate_temporary_name_fixture>
+            ${CMAKE_CURRENT_BINARY_DIR}/temporary_name_kernel.f90
+        DEPENDS generate_temporary_name_fixture
+        VERBATIM)
+    add_executable(test_temporary_names test/test_temporary_names.f90
+        ${CMAKE_CURRENT_BINARY_DIR}/temporary_name_kernel.f90)
+    if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(test_temporary_names PRIVATE
+            -std=f2018 -ffree-line-length-132 -Werror=line-truncation)
+    endif()
+    add_test(NAME temporary_name_validation COMMAND generate_temporary_name_fixture
+        ${CMAKE_CURRENT_BINARY_DIR}/temporary_names_checked.f90)
+    add_test(NAME temporary_names COMMAND test_temporary_names)
     if(FORTGEN_BUILD_CUDA_TESTING)
         enable_language(CUDA)
         add_custom_command(
