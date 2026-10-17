@@ -98,7 +98,11 @@ if(FORTGEN_BUILD_TESTING)
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/temporary_name_kernel.f90
         COMMAND $<TARGET_FILE:generate_temporary_name_fixture>
             ${CMAKE_CURRENT_BINARY_DIR}/temporary_name_kernel.f90
+        COMMAND ${CMAKE_COMMAND} -E compare_files
+            ${CMAKE_CURRENT_BINARY_DIR}/temporary_name_kernel.f90
+            ${CMAKE_CURRENT_SOURCE_DIR}/test/temporary_name_kernel.f90
         DEPENDS generate_temporary_name_fixture
+            test/temporary_name_kernel.f90
         VERBATIM)
     add_executable(test_temporary_names test/test_temporary_names.f90
         ${CMAKE_CURRENT_BINARY_DIR}/temporary_name_kernel.f90)

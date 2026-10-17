@@ -35,6 +35,11 @@ name = "test_linewrap_kernel"
 source-dir = "test"
 main = "test_linewrap_kernel.f90"
 
+[[test]]
+name = "test_temporary_names"
+source-dir = "test"
+main = "test_temporary_names.f90"
+
 [fortran]
 implicit-external = false
 implicit-typing = false
