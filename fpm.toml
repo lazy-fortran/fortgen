@@ -7,11 +7,33 @@ license = "MIT"
 [build]
 auto-examples = false
 auto-executables = false
+# CMake runs fixture generators with their required output-path arguments.
+auto-tests = false
 
 [[executable]]
 name = "fortgen-codegen"
 source-dir = "app"
 main = "fortgen_codegen.f90"
+
+[[test]]
+name = "test_fortgen"
+source-dir = "test"
+main = "test_fortgen.f90"
+
+[[test]]
+name = "test_kernel_ir"
+source-dir = "test"
+main = "test_kernel_ir.f90"
+
+[[test]]
+name = "test_reciprocal_kernel"
+source-dir = "test"
+main = "test_reciprocal_kernel.f90"
+
+[[test]]
+name = "test_linewrap_kernel"
+source-dir = "test"
+main = "test_linewrap_kernel.f90"
 
 [fortran]
 implicit-external = false

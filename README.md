@@ -68,6 +68,11 @@ ctest --test-dir build --output-on-failure
 
 `fortgen-codegen fortran INPUT.fgir OUTPUT.f90` emits a scalar leaf. The native
 compiled oracle compares emitted values against independent real128 formulas.
+The checked-in generated kernels in `test/` also let `fpm test` link and run the
+same numerical oracles without a generation hook. CMake regenerates these
+fixtures and checks them against the checked-in copies before compiling.
+After changing an emitter or fixture, regenerate the corresponding copy with
+`fortgen-codegen` or the corresponding fixture generator from the CMake build.
 Optional direct-SymPy examples and requirements are in [python/README.md](python/README.md).
 Migration ownership is in [docs/migration.md](docs/migration.md).
 

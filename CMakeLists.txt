@@ -63,7 +63,11 @@ if(FORTGEN_BUILD_TESTING)
         COMMAND $<TARGET_FILE:fortgen-codegen> fortran
             ${CMAKE_CURRENT_SOURCE_DIR}/test/reciprocal_kernel.fgir
             ${CMAKE_CURRENT_BINARY_DIR}/reciprocal_kernel.f90
+        COMMAND ${CMAKE_COMMAND} -E compare_files
+            ${CMAKE_CURRENT_BINARY_DIR}/reciprocal_kernel.f90
+            ${CMAKE_CURRENT_SOURCE_DIR}/test/reciprocal_kernel.f90
         DEPENDS fortgen-codegen test/reciprocal_kernel.fgir
+            test/reciprocal_kernel.f90
         VERBATIM)
     add_executable(test_reciprocal_kernel test/test_reciprocal_kernel.f90
         ${CMAKE_CURRENT_BINARY_DIR}/reciprocal_kernel.f90)
@@ -73,7 +77,11 @@ if(FORTGEN_BUILD_TESTING)
         COMMAND $<TARGET_FILE:fortgen-codegen> fortran
             ${CMAKE_CURRENT_SOURCE_DIR}/test/linewrap_kernel.fgir
             ${CMAKE_CURRENT_BINARY_DIR}/linewrap_kernel.f90
+        COMMAND ${CMAKE_COMMAND} -E compare_files
+            ${CMAKE_CURRENT_BINARY_DIR}/linewrap_kernel.f90
+            ${CMAKE_CURRENT_SOURCE_DIR}/test/linewrap_kernel.f90
         DEPENDS fortgen-codegen test/linewrap_kernel.fgir
+            test/linewrap_kernel.f90
         VERBATIM)
     add_executable(test_linewrap_kernel test/test_linewrap_kernel.f90
         ${CMAKE_CURRENT_BINARY_DIR}/linewrap_kernel.f90)
