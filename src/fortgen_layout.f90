@@ -75,19 +75,42 @@ contains
     integer function break_point(line, lo, hi) result(cut)
         !! Last position at or before `hi` that a continuation may follow.
         !!
-        !! Only whitespace qualifies, which is what keeps a break out of the
-        !! middle of `**`, of a numeric literal, and of an identifier.
+        !! Whitespace and the end of an opening parenthesis or comma qualify.
+        !! In particular, `procedure_name(first_argument` may be longer than a
+        !! line even though both identifiers satisfy Fortran's length limit.
+        !! Never break inside a quoted literal, `**`, a number or an identifier.
         character(len=*), intent(in) :: line
         integer, intent(in) :: lo, hi
         integer :: i, top
+        character :: quote, current
 
         cut = lo - 1
         top = min(hi, len(line))
-        do i = top, lo + 1, -1
-            if (line(i:i) == " ") then
-                cut = i - 1
-                return
+        quote = " "
+        i = lo
+        do while (i <= top)
+            current = line(i:i)
+            if (quote /= " ") then
+                if (current == quote) then
+                    if (i < len(line)) then
+                        if (line(i + 1:i + 1) == quote) then
+                            i = i + 2
+                            cycle
+                        end if
+                    end if
+                    quote = " "
+                end if
+            else
+                select case (current)
+                case ("'", '"')
+                    quote = current
+                case (" ")
+                    if (i > lo) cut = i - 1
+                case ("(", ",")
+                    cut = i
+                end select
             end if
+            i = i + 1
         end do
     end function break_point
 

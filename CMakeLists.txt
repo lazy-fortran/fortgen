@@ -63,11 +63,34 @@ if(FORTGEN_BUILD_TESTING)
         COMMAND $<TARGET_FILE:fortgen-codegen> fortran
             ${CMAKE_CURRENT_SOURCE_DIR}/test/reciprocal_kernel.fgir
             ${CMAKE_CURRENT_BINARY_DIR}/reciprocal_kernel.f90
+        COMMAND ${CMAKE_COMMAND} -E compare_files
+            ${CMAKE_CURRENT_BINARY_DIR}/reciprocal_kernel.f90
+            ${CMAKE_CURRENT_SOURCE_DIR}/test/reciprocal_kernel.f90
         DEPENDS fortgen-codegen test/reciprocal_kernel.fgir
+            test/reciprocal_kernel.f90
         VERBATIM)
     add_executable(test_reciprocal_kernel test/test_reciprocal_kernel.f90
         ${CMAKE_CURRENT_BINARY_DIR}/reciprocal_kernel.f90)
     add_test(NAME reciprocal_kernel COMMAND test_reciprocal_kernel)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/linewrap_kernel.f90
+        COMMAND $<TARGET_FILE:fortgen-codegen> fortran
+            ${CMAKE_CURRENT_SOURCE_DIR}/test/linewrap_kernel.fgir
+            ${CMAKE_CURRENT_BINARY_DIR}/linewrap_kernel.f90
+        COMMAND ${CMAKE_COMMAND} -E compare_files
+            ${CMAKE_CURRENT_BINARY_DIR}/linewrap_kernel.f90
+            ${CMAKE_CURRENT_SOURCE_DIR}/test/linewrap_kernel.f90
+        DEPENDS fortgen-codegen test/linewrap_kernel.fgir
+            test/linewrap_kernel.f90
+        VERBATIM)
+    add_executable(test_linewrap_kernel test/test_linewrap_kernel.f90
+        ${CMAKE_CURRENT_BINARY_DIR}/linewrap_kernel.f90)
+    target_link_libraries(test_linewrap_kernel PRIVATE fortgen)
+    if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(test_linewrap_kernel PRIVATE
+            -ffree-line-length-132 -Werror=line-truncation)
+    endif()
+    add_test(NAME linewrap_kernel COMMAND test_linewrap_kernel)
     if(FORTGEN_BUILD_CUDA_TESTING)
         enable_language(CUDA)
         add_custom_command(
