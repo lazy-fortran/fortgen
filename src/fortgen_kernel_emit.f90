@@ -883,6 +883,13 @@ contains
             end if
             if (is_compound(ir%nodes(k)%operation)) then
                 temporary = prefix//chars(str(k))
+                if (backend == BACKEND_FORTRAN) then
+                    if (.not. valid_fortran_name(temporary)) then
+                        message = "kernel emitter: temporary name exceeds Fortran's "// &
+                            "63-character limit: "//temporary
+                        return
+                    end if
+                end if
                 if (is_argument(temporary, spec%args) .or. &
                     is_argument(temporary, spec%outputs)) then
                     message = "kernel emitter: temporary collides with an argument: "// &
