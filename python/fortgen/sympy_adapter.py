@@ -25,6 +25,7 @@ _FUNCTIONS = {
     "erf": "erf", "erfc": "erfc", "gamma": "gamma", "loggamma": "loggamma",
     "besselj": "besselj", "bessely": "bessely",
     "besseli": "besseli", "besselk": "besselk",
+    "elliptic_k": "elliptic_k", "elliptic_e": "elliptic_e",
     "Min": "Min", "Max": "Max",
 }
 

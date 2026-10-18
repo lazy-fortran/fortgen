@@ -86,8 +86,54 @@ program test_kernel_ir
     call small_power_policy()
 
     call check_long_statements_continue()
+    call check_elliptic_special_use()
 
 contains
+
+    subroutine check_elliptic_special_use()
+        !! Complete elliptic integrals K(m), E(m) are fortnum_special entry
+        !! points: the leaf must import them and spell them ellip_k/ellip_e,
+        !! while CUDA, which has no such runtime, must refuse them.
+        type(kernel_ir_t) :: ell
+        type(kernel_emit_spec_t) :: ell_spec
+        type(str_t) :: text
+
+        call kernel_ir_allocate(ell, 3, 2, 2)
+        ell%nodes(1)%operation = IR_SYMBOL
+        ell%nodes(1)%name = str("m")
+        ell%nodes(1)%first_operand = 1
+        ell%nodes(2)%operation = IR_FUNCTION
+        ell%nodes(2)%name = str("elliptic_e")
+        ell%nodes(2)%first_operand = 1
+        ell%nodes(2)%n_operands = 1
+        ell%nodes(3)%operation = IR_FUNCTION
+        ell%nodes(3)%name = str("elliptic_k")
+        ell%nodes(3)%first_operand = 2
+        ell%nodes(3)%n_operands = 1
+        ell%operands = [1, 1]
+        ell%outputs = [3, 2]
+        allocate(ell_spec%args(1), ell_spec%outputs(2))
+        ell_spec%name = str("elliptic_leaf")
+        ell_spec%args = [str("m")]
+        ell_spec%outputs = [str("k_value"), str("e_value")]
+        ell_spec%temp_prefix = str("t")
+        ell_spec%target = TARGET_FORTRAN_CPU
+        ell_spec%producer = str("fortgen")
+        ell_spec%generator = str("test_kernel_ir")
+        ell_spec%regenerate_command = str("fpm test")
+
+        text = emit_fortran_kernel_ir(ell, ell_spec, ok, message)
+        call require(ok, message)
+        call require(index(chars(text), &
+            "use fortnum_special, only: ellip_k, ellip_e") > 0, &
+            "elliptic leaf does not import fortnum_special")
+        call require(index(chars(text), "ellip_k(m)") > 0, "missing ellip_k(m)")
+        call require(index(chars(text), "ellip_e(m)") > 0, "missing ellip_e(m)")
+
+        ell_spec%target = TARGET_CUDA
+        text = emit_cuda_device_ir(ell, ell_spec, ok, message)
+        call require(.not. ok, "CUDA accepted an elliptic integral")
+    end subroutine check_elliptic_special_use
 
     subroutine check_long_statements_continue()
         !! A leaf with many arguments and a long sum must stay within the

@@ -15,7 +15,8 @@ contains
                 "sinh", "cosh", "tanh", "asinh", "acosh", "atanh", &
                 "exp", "log", "log10", "sqrt", "abs", "erf", "erfc", &
                 "gamma", "loggamma", "max", "min", "Min", "Max", &
-                "besselj", "bessely", "besseli", "besselk")
+                "besselj", "bessely", "besseli", "besselk", &
+                "elliptic_k", "elliptic_e")
             ok = .true.
         case default
             ok = .false.
@@ -38,7 +39,8 @@ contains
 
     pure logical function fortran_function_uses_special(name) result(ok)
         character(*), intent(in) :: name
-        ok = name == "besseli" .or. name == "besselk"
+        ok = name == "besseli" .or. name == "besselk" .or. &
+            name == "elliptic_k" .or. name == "elliptic_e"
     end function fortran_function_uses_special
 
     pure function fortran_function_spelling(name) result(text)
@@ -50,6 +52,10 @@ contains
         case ("bessely");  text = "bessel_yn"
         case ("besseli");  text = "bessel_in"
         case ("besselk");  text = "bessel_kn"
+        ! Complete elliptic integrals in the parameter convention m = k**2,
+        ! as provided by fortnum_special (ellip_k, ellip_e).
+        case ("elliptic_k"); text = "ellip_k"
+        case ("elliptic_e"); text = "ellip_e"
         case ("Min");      text = "min"
         case ("Max");      text = "max"
         case default;      text = name

@@ -656,29 +656,32 @@ contains
         type(strbuf_t), intent(inout) :: b
         type(kernel_ir_t), intent(in) :: ir
         type(kernel_emit_spec_t), intent(in) :: spec
-        logical :: have_in, have_kn
-        integer :: k
+        ! Special heads in the fixed order of the emitted only-list.
+        character(len=10), parameter :: heads(4) = [character(len=10) :: &
+            "besseli", "besselk", "elliptic_k", "elliptic_e"]
+        logical :: used(size(heads)), first
+        integer :: k, j
         character(:), allocatable :: module_name
 
-        have_in = .false.
-        have_kn = .false.
+        used = .false.
         do k = 1, ir%n_nodes
             if (ir%nodes(k)%operation /= IR_FUNCTION) cycle
-            select case (chars(ir%nodes(k)%name))
-            case ("besseli")
-                have_in = .true.
-            case ("besselk")
-                have_kn = .true.
-            end select
+            do j = 1, size(heads)
+                if (chars(ir%nodes(k)%name) == trim(heads(j))) used(j) = .true.
+            end do
         end do
-        if (.not. have_in .and. .not. have_kn) return
+        if (.not. any(used)) return
 
         module_name = chars(spec%special_module)
         if (len_trim(module_name) == 0) module_name = "fortnum_special"
         call b%append("    use "//trim(module_name)//", only: ")
-        if (have_in) call b%append("bessel_in")
-        if (have_in .and. have_kn) call b%append(", ")
-        if (have_kn) call b%append("bessel_kn")
+        first = .true.
+        do j = 1, size(heads)
+            if (.not. used(j)) cycle
+            if (.not. first) call b%append(", ")
+            call b%append(fortran_function_spelling(trim(heads(j))))
+            first = .false.
+        end do
         call b%newline()
     end subroutine append_special_use
 
