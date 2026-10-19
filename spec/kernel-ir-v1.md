@@ -1,7 +1,7 @@
 # FortGen scalar kernel IR v1
 
 `fortgen.kernel_ir.v1` is the stable interchange between symbolic frontends
-and FortGen's scalar Fortran/CUDA backend. It deliberately represents a
+and FortGen's scalar Fortran, CUDA and Python backends. It deliberately represents a
 computation rather than a computer-algebra system.
 
 ## In-memory contract
@@ -49,6 +49,26 @@ whitespace. The supported target names are `default`, `fortran_cpu`,
 `fortran_openmp_target+fortran_openacc`, and `cuda`.
 
 The format is versioned. Incompatible semantic changes require a new header.
+
+Constants are `pi` and `e`. The Python backend also accepts the imaginary unit
+`i`, emitted as `1j`; the Fortran and CUDA backends refuse it, since their
+leaves are real.
+
+## Python backend
+
+`emit_python_kernel_ir` (and `fortgen-codegen python`) emits a self-contained
+`def name(args):` function that returns one value, or a tuple in declared
+output order. It requires the `default` target and `real64`. Literals keep 17
+significant digits, so Python parses them to the same binary64 values. Integer
+exponents outside the small-power expansion print as integer `**` operands.
+Arithmetic broadcasts over NumPy arrays. Functions and `pi`/`e` use
+`numpy` ufuncs (`numpy.arcsin`, `numpy.maximum`, ...), imported inside the
+function only when used; functions without a NumPy ufunc (`erf`, `gamma`,
+Bessel and elliptic functions) are refused, as are Python keywords and `numpy`
+as names. An optional docstring is emitted when it contains no quote,
+backslash or control character other than newline. Python scalars follow
+Python semantics: for example a negative float base with a noninteger exponent
+gives a complex result, where NumPy arrays give NaN.
 
 ## Frontend rule
 

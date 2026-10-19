@@ -113,6 +113,19 @@ if(FORTGEN_BUILD_TESTING)
     add_test(NAME temporary_name_validation COMMAND generate_temporary_name_fixture
         ${CMAKE_CURRENT_BINARY_DIR}/temporary_names_checked.f90)
     add_test(NAME temporary_names COMMAND test_temporary_names)
+    add_executable(test_python_emitter test/test_python_emitter.f90)
+    target_link_libraries(test_python_emitter PRIVATE fortgen)
+    add_test(NAME python_emitter COMMAND test_python_emitter
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/python_kernel.fgir)
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME python_kernel
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test/test_python_kernel.py
+                $<TARGET_FILE:fortgen-codegen>
+                ${CMAKE_CURRENT_SOURCE_DIR}/test/python_kernel.fgir)
+        set_tests_properties(python_kernel PROPERTIES SKIP_RETURN_CODE 77)
+    endif()
     if(FORTGEN_BUILD_CUDA_TESTING)
         enable_language(CUDA)
         add_custom_command(

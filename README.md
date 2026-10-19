@@ -3,9 +3,9 @@
 Target-neutral scalar kernel IR and source generation for lazy-fortran.
 
 [PLAN.md](PLAN.md) records the reviewed work order for extending FortGen to a
-neutral expression/computation IR and code-generation boundary. Scalar Kernel IR
-and Fortran/CUDA leaf emission are available; exact mathematical Expr IR remains
-planned work.
+neutral expression/computation IR and code-generation boundary. Scalar Kernel IR,
+Fortran/CUDA leaf emission and Python function emission are available; exact
+mathematical Expr IR remains planned work.
 Layer ownership and evidence requirements are in
 [docs/principles.md](docs/principles.md).
 
@@ -43,7 +43,7 @@ extracting a shared abstraction. One would have been a guess.
 | `fortgen_layout` | line-limit continuation that never splits a token, indentation |
 | `fortgen_banner` | provenance headers for generated files |
 | `fortgen_kernel_ir` | topologically ordered scalar computation DAG |
-| `fortgen_kernel_emit` | Fortran and CUDA leaf source emission |
+| `fortgen_kernel_emit` | Fortran and CUDA leaf and Python function source emission |
 | `fortgen_kernel_target`, `fortgen_precision` | target and precision descriptors |
 | `fortgen_ir_text` | versioned scalar computation serialization |
 
@@ -66,7 +66,8 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-`fortgen-codegen fortran INPUT.fgir OUTPUT.f90` emits a scalar leaf. The native
+`fortgen-codegen fortran INPUT.fgir OUTPUT.f90` emits a scalar leaf;
+`cuda` and `python` select the other backends. The native
 compiled oracle compares emitted values against independent real128 formulas.
 The checked-in generated kernels in `test/` also let `fpm test` link and run the
 same numerical oracles without a generation hook. CMake regenerates these
