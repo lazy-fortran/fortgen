@@ -1,0 +1,47 @@
+fortgen.kernel_ir.v1
+kernel python_kernel
+precision real64
+target fortran_cpu
+arg k
+arg n
+arg iota
+arg sigma
+arg z
+out g 15
+out h 26
+out r 28
+out s 33
+node 1 symbol k
+node 2 symbol n
+node 3 symbol iota
+node 4 symbol sigma
+node 5 symbol z
+node 6 constant i
+node 7 mul 2 1 3
+node 8 add 2 2 7
+node 9 literal 2.00000000000000000e+00
+node 10 pow 2 8 9
+node 11 pow 2 4 9
+node 12 add 2 10 11
+node 13 literal -1.00000000000000000e+00
+node 14 pow 2 12 13
+node 15 mul 3 6 8 14
+node 16 literal 5.00000000000000000e+00
+node 17 mul 2 13 5
+node 18 add 2 9 17
+node 19 pow 2 18 16
+node 20 function exp 1 17
+node 21 mul 2 19 20
+node 22 constant pi
+node 23 function atan2 2 5 1
+node 24 mul 2 22 23
+node 25 function Max 3 5 1 2
+node 26 add 3 21 24 25
+node 27 literal -2.00000000000000000e+00
+node 28 pow 2 8 27
+node 29 literal 5.00000000000000000e-01
+node 30 pow 2 5 29
+node 31 literal 7.00000000000000000e+00
+node 32 pow 2 5 31
+node 33 add 2 30 32
+end

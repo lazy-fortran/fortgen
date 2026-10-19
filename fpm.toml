@@ -1,6 +1,6 @@
 name = "fortgen"
 version = "0.2.0"
-description = "Shared target-neutral kernel IR and Fortran/CUDA code generation for lazy-fortran"
+description = "Shared target-neutral kernel IR and Fortran/CUDA/Python code generation for lazy-fortran"
 author = "krystophny"
 license = "MIT"
 
@@ -39,6 +39,11 @@ main = "test_linewrap_kernel.f90"
 name = "test_temporary_names"
 source-dir = "test"
 main = "test_temporary_names.f90"
+
+[[test]]
+name = "test_python_emitter"
+source-dir = "test"
+main = "test_python_emitter.f90"
 
 [fortran]
 implicit-external = false
