@@ -80,3 +80,5 @@ Migration ownership is in [docs/migration.md](docs/migration.md).
 ## Licence
 
 MIT.
+
+CPU precision/storage support is described in [precision APIs](docs/precision.md).

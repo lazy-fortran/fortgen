@@ -45,6 +45,16 @@ name = "test_python_emitter"
 source-dir = "test"
 main = "test_python_emitter.f90"
 
+[[test]]
+name = "test_precision_storage"
+source-dir = "test"
+main = "test_precision_storage.f90"
+
+[[test]]
+name = "test_precision_kernel"
+source-dir = "test"
+main = "test_precision_kernel.f90"
+
 [fortran]
 implicit-external = false
 implicit-typing = false
