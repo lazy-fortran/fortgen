@@ -9,7 +9,7 @@ program generate_precision_fixture
     type(kernel_emit_spec_t) :: spec
     type(str_t) :: source
     character(1024) :: input, output
-    character(:), allocatable :: message
+    character(:), allocatable :: message, text
     integer :: unit
     logical :: ok
     if (command_argument_count() == 0) stop
@@ -26,6 +26,11 @@ program generate_precision_fixture
         error stop 2
     end if
     open(newunit=unit, file=trim(output), status='replace')
-    write(unit,'(a)') chars(source)
+    text = chars(source)
+    do while (len(text) > 0)
+        if (text(len(text):) /= new_line('a')) exit
+        text = text(:len(text)-1)
+    end do
+    write(unit,'(a)') text
     close(unit)
 end program

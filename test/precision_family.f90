@@ -84,4 +84,3 @@ pure subroutine fgp_compute(x, y)
     y = t5
 end subroutine fgp_compute
 end subroutine polynomial_bf16
-
