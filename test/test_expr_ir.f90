@@ -2,9 +2,9 @@ program test_expr_ir
     use fortgen_expr_ir, only: expr_ir_t, read_expr_ir
     implicit none
     type(expr_ir_t) :: ir, restored
-    character(:), allocatable :: why, text
+    character(:), allocatable :: why, text, expected, actual
     logical :: ok
-    integer :: a,b,c,x,r,unit
+    integer :: a,b,c,x,r,unit,k
     character(1024) :: path
     call ir%init(20)
     a=ir%add('integer','9007199254740993',[integer::],ok,why)
@@ -29,7 +29,11 @@ program test_expr_ir
         print *, why
         error stop 'roundtrip parse'
     end if
-    if (restored%python(r) /= ir%python(r)) error stop 'exact meaning lost'
+    expected=ir%python(r,ok,why)
+    if (.not. ok) error stop 'render original'
+    actual=restored%python(r,ok,why)
+    if (.not. ok) error stop 'render restored'
+    if (actual/=expected) error stop 'exact meaning lost'
     if (restored%nodes(a)%text /= '9007199254740993') error stop 'rounded integer'
     r=ir%add('symbol',"x'\n",[integer::],ok,why,0,'local')
     if (ok) error stop 'scope conflict'
@@ -40,5 +44,21 @@ program test_expr_ir
     call restored%init(0)
     r=restored%add('integer','1',[integer::],ok,why)
     if (ok) error stop 'budget ignored'
+    call restored%init(200)
+    a=restored%add('integer','1',[integer::],ok,why)
+    do k=1,128
+        b=restored%add('add','',[a],ok,why)
+        if (.not. ok) exit
+        a=b
+    end do
+    if (ok .or. index(why,'depth')==0) error stop 'depth budget ignored'
+    call restored%init(100)
+    a=restored%add('symbol','x',[integer::],ok,why)
+    do k=1,30
+        a=restored%add('mul','',[a,a],ok,why)
+        if (.not. ok) error stop 'shared DAG construction'
+    end do
+    text=restored%python(a,ok,why)
+    if (ok .or. len(text)/=0) error stop 'exponential rendering budget ignored'
     print *, 'exact Expr IR PASS'
 end program

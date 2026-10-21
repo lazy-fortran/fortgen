@@ -16,9 +16,9 @@ order, not algebraic canonicalization. Duplicate structures are permitted.
 
 Single-quoted ASCII text escapes controls, quote and backslash as `\xHH`.
 Names are data, never executable identifiers. No source is evaluated. Scope and
-name form symbol identity; conflicting fact masks are refused. Empty/main scope
-uses ordinary symbols; other scopes use injective `@length:scope:name` names at
-the SymPy boundary. The native FortSym adapter currently supplies main scope.
+name form symbol identity; conflicting fact masks are refused. Empty scope
+uses ordinary symbols; nonempty scopes use injective `@length:scope:name` names at
+the SymPy boundary. The native FortSym adapter currently supplies empty (arena-global) scope.
 Facts, bit 0 through 10: real, positive, nonnegative, nonzero, integer,
 positive-integer, zero, negative, nonpositive, rational, algebraic. Only explicit
 positive facts are supported; inference belongs to the CAS. Contradictions are
@@ -28,7 +28,9 @@ Tags: integer, rational (two integer inputs), constant (pi/E/I/oo/zoo/nan),
 symbol, add, mul, pow, function. Audited elementary functions retain their heads;
 other function names are explicitly uninterpreted. Unsupported nodes, float
 atoms, versions, forward references and malformed literals are refused.
-Defaults: 10,000 nodes, 64 inputs per node, 65,536 ASCII bytes per text field.
+Defaults: 10,000 nodes, 128 levels, 64 inputs per node and 65,536 ASCII bytes per
+text field. Native constructor rendering returns an explicit status and caps
+expanded visits at 10,000 and source at 1 MiB, including shared-DAG expansion.
 The Python reader additionally caps total serialized input at 16 MiB. Native
 callers own input-buffer size. Exact-to-Kernel-IR lowering is deliberately not
 provided by this slice: it requires a separate explicit numerical policy.

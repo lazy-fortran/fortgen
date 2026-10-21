@@ -46,7 +46,7 @@ def loads(text, *, max_nodes=10000):
     lines = text.splitlines()
     if not lines or lines[0] != 'fortgen-expr-ir 1':
         raise ValueError('unknown Expr IR version')
-    nodes, symbols = [], {}
+    nodes, symbols, depths = [], {}, []
     token = re.compile(r"'(?:\\x[0-9A-Fa-f]{2}|[^'\\])*'|[^ ]+")
     for line in lines[1:]:
         parts = token.findall(line)
@@ -97,6 +97,10 @@ def loads(text, *, max_nodes=10000):
             valid = bool(text_value)
         if not valid or tag != 'symbol' and facts:
             raise ValueError('unsupported or malformed node')
+        depth = 1 + max((depths[j-1] for j in args), default=0)
+        if depth > 128:
+            raise ValueError('Expr IR depth budget exhausted')
+        depths.append(depth)
         nodes.append(Node(tag, text_value, scope, facts, args))
     return nodes
 
@@ -106,10 +110,12 @@ def from_sympy(expression, *, scope=''):
     from sympy.core.function import AppliedUndef
     nodes, cache = [], {}
 
-    def visit(e):
+    def visit(e, depth=0):
+        if depth >= 128 or len(nodes) >= 10000:
+            raise ValueError('Expr IR traversal budget exhausted')
         if e in cache:
             return cache[e]
-        args = tuple(visit(a) for a in e.args)
+        args = tuple(visit(a, depth+1) for a in e.args)
         if isinstance(e, sp.Integer):
             n = Node('integer', str(e))
         elif isinstance(e, sp.Rational):
@@ -162,7 +168,7 @@ def to_sympy(nodes, root=None):
             facts = {f: True for k, f in enumerate(FACTS) if n.facts & (1 << k)}
             if facts.pop('positive_integer', False):
                 facts.update(positive=True, integer=True)
-            name = n.text if n.scope in ('', 'main') else f'@{len(n.scope)}:{n.scope}:{n.text}'
+            name = n.text if n.scope == '' else f'@{len(n.scope)}:{n.scope}:{n.text}'
             value = sp.Symbol(name, **facts)
         elif n.tag == 'function':
             head = getattr(sp, n.text) if n.text in FUNCTIONS else sp.Function(n.text)

@@ -6,7 +6,7 @@ module fortgen_expr_ir
     public :: expr_ir_t, expr_node_t, python_string, exact_integer, read_expr_ir
     type :: expr_node_t
         character(:), allocatable :: tag, text, scope
-        integer :: facts = 0
+        integer :: facts = 0, depth = 1
         integer, allocatable :: args(:)
     end type
     type :: expr_ir_t
@@ -137,7 +137,7 @@ contains
         character(:), allocatable, intent(out) :: why
         integer, optional, intent(in) :: facts
         character(*), optional, intent(in) :: scope
-        integer :: k, f
+        integer :: k, f, depth
         logical :: positive, nonnegative, nonpositive, nonzero, zero
         character(:), allocatable :: domain
         id = 0
@@ -151,6 +151,14 @@ contains
         if (present(facts)) f = facts
         if (f < 0 .or. f > 2047) return
         if (size(args) > 64) return
+        depth=1
+        do k=1,size(args)
+            depth=max(depth,self%nodes(args(k))%depth+1)
+        end do
+        if (depth>128) then
+            why='exact Expr IR: depth budget exhausted'
+            return
+        end if
         if (any([(iachar(text(k:k)) > 127, k=1,len(text))])) return
         domain = ''
         if (present(scope)) domain = scope
@@ -208,6 +216,7 @@ contains
         self%nodes(id)%text = text
         self%nodes(id)%args = args
         self%nodes(id)%facts = f
+        self%nodes(id)%depth = depth
         self%nodes(id)%scope = ''
         if (present(scope)) self%nodes(id)%scope = scope
         ok = .true.
@@ -232,16 +241,38 @@ contains
         quoted = quoted//"'"
     end function
 
-    recursive function python(self, id) result(text)
+    function python(self,id,ok,why) result(text)
         class(expr_ir_t), intent(in) :: self
         integer, intent(in) :: id
+        logical, intent(out) :: ok
+        character(:), allocatable, intent(out) :: why
+        character(:), allocatable :: text
+        integer :: remaining
+        remaining=10000
+        ok=.true.
+        why=''
+        text=render(self,id,remaining,ok,why)
+        if (.not. ok) text=''
+    end function
+
+    recursive function render(self, id, remaining, ok, why) result(text)
+        class(expr_ir_t), intent(in) :: self
+        integer, intent(in) :: id
+        integer, intent(inout) :: remaining
+        logical, intent(inout) :: ok
+        character(:), allocatable, intent(inout) :: why
         character(:), allocatable :: text, child, head
         character(16), parameter :: names(11) = [character(16) :: &
             'real','positive','nonnegative','nonzero','integer','positive', &
             'zero','negative','nonpositive','rational','algebraic']
         integer :: k
         text = ''
-        if (id < 1 .or. id > self%n) return
+        if (id < 1 .or. id > self%n .or. remaining<=0) then
+            ok=.false.
+            why='exact Expr IR: invalid node or render visit budget exhausted'
+            return
+        end if
+        remaining=remaining-1
         select case(self%nodes(id)%tag)
         case('integer')
             text = 'sp.Integer('//python_string(self%nodes(id)%text)//')'
@@ -251,7 +282,7 @@ contains
             return
         case('symbol')
             child=self%nodes(id)%text
-            if (self%nodes(id)%scope/='' .and. self%nodes(id)%scope/='main') then
+            if (self%nodes(id)%scope/='') then
                 block
                     character(32) :: length_text
                     write(length_text,'(i0)') len(self%nodes(id)%scope)
@@ -285,7 +316,13 @@ contains
         text=head//'('
         do k=1,size(self%nodes(id)%args)
             if (k>1) text=text//', '
-            child=self%python(self%nodes(id)%args(k))
+            child=render(self,self%nodes(id)%args(k),remaining,ok,why)
+            if (.not. ok) return
+            if (len(text)+len(child)>1024*1024) then
+                ok=.false.
+                why="exact Expr IR: render byte budget exhausted"
+                return
+            end if
             text=text//child
         end do
         text=text//')'
