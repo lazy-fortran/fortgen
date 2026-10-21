@@ -51,7 +51,7 @@ fpm install --prefix "$PWD/.local"
     echo 'Build and test Fortran with CMake'
     (
 cmake -S . -B cmake-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build cmake-build -j
+cmake --build cmake-build -j "${SCI_CPUS:-8}"
 ctest --test-dir cmake-build --output-on-failure
 
 
