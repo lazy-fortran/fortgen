@@ -168,7 +168,23 @@ if(FORTGEN_BUILD_TESTING)
                 DEPENDS fortgen-codegen
                     ${CMAKE_CURRENT_BINARY_DIR}/batch_${precision}.fgir VERBATIM)
         endforeach()
+        foreach(batch_name n i inputs outputs)
+            file(READ ${CMAKE_CURRENT_BINARY_DIR}/batch_real64.fgir batch_fixture)
+            string(REPLACE "kernel batch_real64" "kernel ${batch_name}"
+                batch_fixture "${batch_fixture}")
+            file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/batch_${batch_name}.fgir
+                "${batch_fixture}")
+            add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/batch_${batch_name}.cuh
+                COMMAND $<TARGET_FILE:fortgen-codegen> cuda-batch
+                    ${CMAKE_CURRENT_BINARY_DIR}/batch_${batch_name}.fgir
+                    ${CMAKE_CURRENT_BINARY_DIR}/batch_${batch_name}.cuh
+                DEPENDS fortgen-codegen ${CMAKE_CURRENT_BINARY_DIR}/batch_${batch_name}.fgir
+                VERBATIM)
+            list(APPEND batch_name_headers
+                ${CMAKE_CURRENT_BINARY_DIR}/batch_${batch_name}.cuh)
+        endforeach()
         add_executable(test_cuda_batch test/device/test_cuda_batch.cu
+            ${batch_name_headers}
             ${CMAKE_CURRENT_BINARY_DIR}/batch_real64.cuh
             ${CMAKE_CURRENT_BINARY_DIR}/batch_real32.cuh
             ${CMAKE_CURRENT_BINARY_DIR}/batch_mixed.cuh)

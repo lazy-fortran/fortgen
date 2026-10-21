@@ -7,6 +7,10 @@
 #include "batch_real64.cuh"
 #include "batch_real32.cuh"
 #include "batch_mixed.cuh"
+#include "batch_n.cuh"
+#include "batch_i.cuh"
+#include "batch_inputs.cuh"
+#include "batch_outputs.cuh"
 
 static void check(cudaError_t rc) {
     if (rc != cudaSuccess) throw std::runtime_error(cudaGetErrorString(rc));
@@ -37,6 +41,10 @@ static void run(std::size_t n) {
         batch_real32_batch<<<blocks,128>>>(n, device_x, device_y);
     if constexpr (precision == 2)
         batch_mixed_batch<<<blocks,128>>>(n, device_x, device_y);
+    if constexpr (precision == 3) n_batch<<<blocks,128>>>(n, device_x, device_y);
+    if constexpr (precision == 4) i_batch<<<blocks,128>>>(n, device_x, device_y);
+    if constexpr (precision == 5) inputs_batch<<<blocks,128>>>(n, device_x, device_y);
+    if constexpr (precision == 6) outputs_batch<<<blocks,128>>>(n, device_x, device_y);
     check(cudaGetLastError());
     check(cudaMemcpy(y.data(), device_y, y.size()*sizeof(Output), cudaMemcpyDeviceToHost));
     for (std::size_t i=0; i<n; ++i) {
@@ -44,7 +52,7 @@ static void run(std::size_t n) {
         const long double reference[4] = {a*(a+b), (2*a+b)*da+a*db,
                                          (2*a+b)*seed, a*seed};
         for (std::size_t j=0; j<4; ++j) {
-            const double tolerance = precision == 0 ? 2e-14 : 2e-6;
+            const double tolerance = (precision == 0 || precision >= 3) ? 2e-14 : 2e-6;
             if (std::abs(y[j*n+i]-reference[j]) > tolerance*(1+std::abs(reference[j])))
                 throw std::runtime_error("CUDA batch primal/JVP/VJP oracle failed");
         }
@@ -60,6 +68,10 @@ int main() {
         run<double,double,0>(n);
         run<float,float,1>(n);
         run<float,double,2>(n);
+        run<double,double,3>(n);
+        run<double,double,4>(n);
+        run<double,double,5>(n);
+        run<double,double,6>(n);
     }
     std::puts("CUDA SoA batch primal/JVP/VJP: PASS (fp64, fp32, mixed)");
 }

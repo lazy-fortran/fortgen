@@ -134,6 +134,7 @@ contains
         type(str_t) :: source, leaf
         type(strbuf_t) :: b
         character(:), allocatable :: input_type, output_type, name
+        character(:), allocatable :: count_name, index_name, input_name, output_name
         integer :: j
 
         source = str('')
@@ -143,6 +144,13 @@ contains
         ok = .false.
         message = 'CUDA batch name exceeds 63 characters with _batch suffix'
         if (len(name) > 57) return
+        ! Only rename a local when it would hide the scalar device procedure.
+        count_name = 'n'; index_name = 'i'
+        input_name = 'inputs'; output_name = 'outputs'
+        if (name == 'n') count_name = 'fg_batch_n'
+        if (name == 'i') index_name = 'fg_batch_i'
+        if (name == 'inputs') input_name = 'fg_batch_inputs'
+        if (name == 'outputs') output_name = 'fg_batch_outputs'
         input_type = 'double'
         output_type = 'double'
         if (spec%precision /= PRECISION_REAL64) input_type = 'float'
@@ -155,24 +163,26 @@ contains
         call b%newline()
         call b%append('static __global__ void '//name//'_batch(')
         call b%newline()
-        call b%append('    std::size_t n, const '//input_type// &
-            '* inputs, '//output_type//'* outputs) {')
+        call b%append('    std::size_t '//count_name//', const '//input_type// &
+            '* '//input_name//', '//output_type//'* '//output_name//') {')
         call b%newline()
-        call b%append('    const std::size_t i = std::size_t(blockIdx.x)'// &
+        call b%append('    const std::size_t '//index_name//' = std::size_t(blockIdx.x)'// &
             '*blockDim.x + threadIdx.x;')
         call b%newline()
-        call b%append('    if (i >= n) return;')
+        call b%append('    if ('//index_name//' >= '//count_name//') return;')
         call b%newline()
         call b%append('    '//name//'(')
         call b%newline()
         do j = 1, size(spec%args)
-            call b%append('        inputs['//chars(str(j - 1))//'*n + i]')
+            call b%append('        '//input_name//'['//chars(str(j - 1))// &
+                '*'//count_name//' + '//index_name//']')
             if (j < size(spec%args) .or. size(spec%outputs) > 0) &
                 call b%append(',')
             call b%newline()
         end do
         do j = 1, size(spec%outputs)
-            call b%append('        &outputs['//chars(str(j - 1))//'*n + i]')
+            call b%append('        &'//output_name//'['//chars(str(j - 1))// &
+                '*'//count_name//' + '//index_name//']')
             if (j < size(spec%outputs)) call b%append(',')
             call b%newline()
         end do
