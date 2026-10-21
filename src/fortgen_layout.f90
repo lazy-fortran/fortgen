@@ -14,7 +14,7 @@ module fortgen_layout
     implicit none
     private
 
-    public :: put_wrapped, indent_of, DEFAULT_LINE_LIMIT
+    public :: put_wrapped, indent_of, DEFAULT_LINE_LIMIT, wrap_fortran_source
 
     !! The standard allows 132 columns. Stopping well short leaves room for
     !! indentation and the trailing ampersand, and keeps generated code
@@ -23,17 +23,78 @@ module fortgen_layout
 
 contains
 
-    subroutine put_wrapped(b, indent, line, limit)
+    function wrap_fortran_source(text) result(wrapped)
+        !! Apply statement layout to a complete free-form source, including
+        !! OpenMP/OpenACC sentinels and ordinary provenance comments.
+        character(*), intent(in) :: text
+        character(:), allocatable :: wrapped, line, indent, sentinel
+        type(buffer_t) :: out
+        integer :: first, last, body, cut, room
+
+        first = 1
+        do while (first <= len(text))
+            last = index(text(first:), new_line("a"))
+            if (last == 0) then
+                last = len(text) + 1
+            else
+                last = first + last - 1
+            end if
+            line = text(first:last - 1)
+            body = verify(line, " ")
+            if (body == 0) then
+                call out%line(line)
+            else
+                indent = line(:body - 1)
+                line = line(body:)
+                if (index(line, "!$omp") == 1 .or. &
+                    index(line, "!$acc") == 1) then
+                    sentinel = line(:5)
+                    call put_wrapped(out, indent, line, &
+                        continuation=sentinel//"& ")
+                else if (index(line, "!GCC$") == 1) then
+                    ! GCC attributes have no free-form continuation syntax.
+                    call out%line(indent//line)
+                else if (line(:1) == "!") then
+                    room = DEFAULT_LINE_LIMIT - len(indent)
+                    do while (len(line) > room)
+                        cut = scan(line(:room), " ", back=.true.)
+                        if (cut <= 1) cut = room
+                        call out%line(indent//line(:cut))
+                        line = "! "//trim(adjustl(line(cut + 1:)))
+                    end do
+                    call out%line(indent//line)
+                else
+                    call put_wrapped(out, indent, line)
+                end if
+            end if
+            first = last + 1
+        end do
+        wrapped = out%str()
+        first = 1
+        do while (first <= len(wrapped))
+            last = index(wrapped(first:), new_line("a"))
+            if (last == 0) last = len(wrapped) - first + 2
+            if (last - 1 > 132) &
+                error stop "Fortran layout: unbreakable token exceeds 132 columns"
+            first = first + last
+        end do
+    end function wrap_fortran_source
+
+    subroutine put_wrapped(b, indent, line, limit, continuation)
         !! Append one statement, continuing it before the column limit.
         type(buffer_t), intent(inout) :: b
         character(len=*), intent(in) :: indent, line
         !! Column limit, default `DEFAULT_LINE_LIMIT`.
         integer, intent(in), optional :: limit
+        character(*), intent(in), optional :: continuation
+        character(:), allocatable :: prefix
         integer :: start, remaining, room, cut, cols
 
         cols = DEFAULT_LINE_LIMIT
         if (present(limit)) cols = limit
 
+        prefix = "    "
+        if (present(continuation)) prefix = continuation
         room = cols - len(indent)
         if (room < 16) room = 16
         if (len(line) <= room) then
@@ -44,10 +105,10 @@ contains
         start = 1
         do
             ! Continuation lines carry four more columns of indentation.
-            if (start > 1) room = max(16, cols - len(indent) - 4)
+            if (start > 1) room = max(16, cols - len(indent) - len(prefix))
             remaining = len(line) - start + 1
             if (remaining <= room) then
-                call b%line(indent//"    "//line(start:))
+                call b%line(indent//prefix//line(start:))
                 return
             end if
             cut = break_point(line, start, start + room - 3)
@@ -62,7 +123,7 @@ contains
             if (start == 1) then
                 call b%line(indent//line(start:cut)//" &")
             else
-                call b%line(indent//"    "//line(start:cut)//" &")
+                call b%line(indent//prefix//line(start:cut)//" &")
             end if
             start = cut + 1
             do while (start <= len(line))
