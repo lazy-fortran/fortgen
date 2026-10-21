@@ -12,28 +12,47 @@ permissions:
 
 jobs:
   build-test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","itp-slurm"]') }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Bundle exact sources for Slurm
+        if: ${{ !github.event.pull_request.head.repo.fork }}
+        env:
+          SCI_TIER: ci-build-test
+        run: |-
+          TMPDIR="$RUNNER_TEMP" ci/bundle.sh "$RUNNER_TEMP/ci.tar.zst"
+      - name: Run native checks on sCluster
+        if: ${{ !github.event.pull_request.head.repo.fork }}
+        run: |-
+          sci-dispatch native "$RUNNER_TEMP/ci.tar.zst"
       - name: Install gfortran
         run: sudo apt-get update && sudo apt-get install -y gfortran
+        if: ${{ github.event.pull_request.head.repo.fork }}
       - uses: fortran-lang/setup-fpm@v7
+        if: ${{ github.event.pull_request.head.repo.fork }}
       - name: Build and test Fortran with fpm
         run: |
           fpm build
           fpm test
           fpm install --prefix "$PWD/.local"
+        if: ${{ github.event.pull_request.head.repo.fork }}
       - name: Build and test Fortran with CMake
         run: |
           cmake -S . -B cmake-build -DCMAKE_BUILD_TYPE=Debug
           cmake --build cmake-build -j
           ctest --test-dir cmake-build --output-on-failure
+        if: ${{ github.event.pull_request.head.repo.fork }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+        if: ${{ github.event.pull_request.head.repo.fork }}
       - name: Test direct SymPy frontend through installed FortGen backend
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e 'python[sympy,test]'
           export PATH="$PWD/.local/bin:$PATH"
           pytest -q python/test
+        if: ${{ github.event.pull_request.head.repo.fork }}
