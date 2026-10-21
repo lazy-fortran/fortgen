@@ -142,6 +142,8 @@ def from_sympy(expression, *, scope=''):
         elif isinstance(e, sp.Pow):
             n = Node('pow', args=args)
         elif isinstance(e, AppliedUndef):
+            if e.func._kwargs:
+                raise ValueError('undefined function attributes are not represented in Expr IR')
             n = Node('uninterpreted', e.func.__name__, args=args)
         elif e.func.__name__ in FUNCTIONS:
             n = Node('function', e.func.__name__, args=args)

@@ -17,9 +17,9 @@ program test_expr_ir
     r=ir%add('mul','',[c,x],ok,why)
     if (.not. ok) error stop 'shared expression'
     u=ir%add('uninterpreted','sin',[x],ok,why)
-    if (.not. ok) error stop 'uninterpreted name collision'
+    if (.not. ok .or. u<1) error stop 'uninterpreted name collision'
     builtin=ir%add('function','sin',[x],ok,why)
-    if (.not. ok) error stop 'builtin sine'
+    if (.not. ok .or. builtin<1) error stop 'builtin sine'
     text=ir%serialize()
     if (command_argument_count()>0) then
         call get_command_argument(1,path)

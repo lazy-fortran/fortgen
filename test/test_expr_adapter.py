@@ -45,6 +45,13 @@ for bad in ('fortgen-expr-ir 2\n',
         pass
     else:
         raise AssertionError('malformed or contradictory input accepted')
+for constrained in (sp.Function('f', real=True)(x), sp.Function('f', nargs=1)(x)):
+    try:
+        from_sympy(constrained)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('undefined function attributes were dropped')
 try:
     from_sympy(sp.Symbol('z', finite=True))
 except ValueError:
