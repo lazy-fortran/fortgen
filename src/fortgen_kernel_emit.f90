@@ -20,7 +20,7 @@ module fortgen_kernel_emit
         PRECISION_MIXED, precision_is_valid, precision_name
     use fortgen_names, only: valid_fortran_name, same_fortran_name, map_fortran_names
     use fortgen_buffer, only: buffer_t
-    use fortgen_layout, only: put_wrapped
+    use fortgen_layout, only: wrap_fortran_source
     implicit none
     private
 
@@ -737,38 +737,10 @@ contains
     end function emit_source
 
     function wrap_fortran_lines(source) result(wrapped)
-        !! Continue every over-long Fortran statement line of an emitted leaf.
-        !!
-        !! Argument lists, declarations and expanded expressions routinely pass
-        !! the 132-column limit, which is a compile error, not a style issue.
-        !! Comment lines keep their text so provenance stays greppable.
         type(str_t), intent(in) :: source
         type(str_t) :: wrapped
-        type(buffer_t) :: out
-        character(:), allocatable :: text
-        integer :: start, stop, body
 
-        text = chars(source)
-        start = 1
-        do while (start <= len(text))
-            stop = index(text(start:), new_line("a"))
-            if (stop == 0) then
-                stop = len(text) + 1
-            else
-                stop = start + stop - 1
-            end if
-            body = verify(text(start:stop - 1), " ")
-            if (body == 0) then
-                call out%line(text(start:stop - 1))
-            else if (text(start + body - 1:start + body - 1) == "!") then
-                call out%line(text(start:stop - 1))
-            else
-                call put_wrapped(out, text(start:start + body - 2), &
-                    text(start + body - 1:stop - 1))
-            end if
-            start = stop + 1
-        end do
-        wrapped = str(out%str())
+        wrapped = str(wrap_fortran_source(chars(source)))
     end function wrap_fortran_lines
 
     subroutine append_special_use(b, ir, spec)

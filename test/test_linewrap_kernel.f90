@@ -2,7 +2,7 @@ program test_linewrap_kernel
     use, intrinsic :: iso_fortran_env, only: real64, real128
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use fortgen_buffer, only: buffer_t
-    use fortgen_layout, only: put_wrapped
+    use fortgen_layout, only: put_wrapped, wrap_fortran_source
     implicit none
     integer :: i
     real(real64) :: x, a, b, c, d, h, fourth, scaled
@@ -17,6 +17,7 @@ program test_linewrap_kernel
     end interface
 
     call check_quoted_literals()
+    call check_source_layout()
     tolerance = 128.0_real128*real(epsilon(x), real128)
     do i = -16, 48
         x = real(i, real64)/32.0_real64
@@ -46,6 +47,28 @@ program test_linewrap_kernel
     end do
     print *, "linewrap kernel: 65 independent real128 Hermite samples passed"
 contains
+    subroutine check_source_layout()
+        character(:), allocatable :: source, wrapped, literal
+        integer :: first, last
+
+        literal = '"one, two (""three"")"'
+        source = "! "//repeat("provenance ", 20)//new_line("a")// &
+            "subroutine long_name("//repeat("a, ", 30)//"z)"//new_line("a")// &
+            "    !$omp declare simd uniform("//repeat("a, ", 30)//"z)"// &
+            new_line("a")//"    call consume("//literal//", "// &
+            repeat("argument, ", 20)//"last)"//new_line("a")
+        wrapped = wrap_fortran_source(source)
+        if (index(wrapped, literal) == 0) error stop "source split literal"
+        if (index(wrapped, "!$omp& ") == 0) error stop "lost OpenMP sentinel"
+        first = 1
+        do while (first <= len(wrapped))
+            last = index(wrapped(first:), new_line("a"))
+            if (last == 0) last = len(wrapped) - first + 2
+            if (last - 1 > 88) error stop "source exceeds 88 columns"
+            first = first + last
+        end do
+    end subroutine check_source_layout
+
     subroutine check_quoted_literals()
         type(buffer_t) :: text
         character(:), allocatable :: literal, wrapped
