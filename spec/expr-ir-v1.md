@@ -25,8 +25,11 @@ positive facts are supported; inference belongs to the CAS. Contradictions are
 refused, with semantic consistency additionally checked by the receiving CAS.
 
 Tags: integer, rational (two integer inputs), constant (pi/E/I/oo/zoo/nan),
-symbol, add, mul, pow, function. Audited elementary functions retain their heads;
-other function names are explicitly uninterpreted. Unsupported nodes, float
+symbol, add, mul, pow, function, uninterpreted. The explicit uninterpreted tag
+preserves undefined functions even when named sin or another builtin. Audited
+unary elementary function nodes retain their heads and require one input;
+legacy unknown function names remain uninterpreted. Undefined-function attributes
+(assumptions or constrained arity) are refused by the ordinary-SymPy adapter. Unsupported nodes, float
 atoms, versions, forward references and malformed literals are refused.
 Defaults: 10,000 nodes, 128 levels, 64 inputs per node and 65,536 ASCII bytes per
 text field. Native constructor rendering returns an explicit status and caps
