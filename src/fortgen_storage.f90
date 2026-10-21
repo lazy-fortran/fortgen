@@ -2,8 +2,6 @@ module fortgen_storage
     !! Portable IEEE binary16/bfloat16 storage; arithmetic stays fp32/fp64.
     !! Round directly from binary64, nearest with ties to even (no double round).
     use, intrinsic :: iso_fortran_env, only: int16, int32, int64, real64
-    use, intrinsic :: ieee_arithmetic, only: ieee_is_nan, ieee_is_finite, &
-        ieee_value, ieee_positive_inf, ieee_quiet_nan
     implicit none
     private
     public :: pack_fp16, unpack_fp16, pack_bf16, unpack_bf16
@@ -36,67 +34,82 @@ contains
         real(real64), intent(in) :: x
         integer, intent(in) :: ebits, fbits
         integer(int16) :: bits
-        integer(int32) :: word, sign_bit, mantissa, biased, bias, emax
-        real(real64) :: a, scaled, remainder
+        integer(int64) :: raw, significand, rounded
+        integer(int32) :: word, sign_bit, biased, bias, emax, source_exp
+        raw = transfer(x, 0_int64)
         sign_bit = 0
-        if (btest(transfer(x, 0_int64), 63)) sign_bit = 32768
+        if (btest(raw, 63)) sign_bit = 32768
+        source_exp = int(ibits(raw, 52, 11))
+        significand = ibits(raw, 0, 52)
         bias = 2**(ebits - 1) - 1
         emax = 2**ebits - 1
-        if (ieee_is_nan(x)) then
-            word = ior(shiftl(emax, fbits), 2**(fbits - 1))
-        else if (.not. ieee_is_finite(x)) then
+        if (source_exp == 2047) then
             word = shiftl(emax, fbits)
+            if (significand /= 0) word = ior(word, 2**(fbits - 1))
+        else if (source_exp == 0) then
+            ! Every binary64 subnormal lies below half a storage subnormal.
+            word = 0
         else
-            a = abs(x)
-            biased = 0
-            mantissa = 0
-            if (a > 0.0_real64) then
-                biased = exponent(a) - 1 + bias
-                if (biased >= emax) then
-                    biased = emax
-                else
-                    ! Subnormals have the same quantum as the smallest normal.
-                    scaled = scale(a, fbits - max(1, biased) + bias)
-                    mantissa = int(scaled, int32)
-                    remainder = scaled - real(mantissa, real64)
-                    if (remainder > 0.5_real64 .or. &
-                        (remainder == 0.5_real64 .and. btest(mantissa, 0))) &
-                        mantissa = mantissa + 1
-                    if (biased <= 0) then
-                        biased = 0
-                        if (mantissa == 2**fbits) biased = 1
-                    else if (mantissa == 2**(fbits + 1)) then
-                        biased = biased + 1
-                        mantissa = 0
-                    end if
-                    mantissa = iand(mantissa, 2**fbits - 1)
+            biased = source_exp - 1023 + bias
+            significand = ibset(significand, 52)
+            if (biased >= emax) then
+                word = shiftl(emax, fbits)
+            else if (biased <= 0) then
+                rounded = round_shift(significand, 53 - fbits - biased)
+                ! Carry into bit fbits produces the smallest normal directly.
+                word = int(rounded, int32)
+            else
+                rounded = round_shift(significand, 52 - fbits)
+                if (rounded == 2_int64**(fbits + 1)) then
+                    biased = biased + 1
+                    rounded = 0
                 end if
+                word = ior(shiftl(biased, fbits), &
+                    iand(int(rounded, int32), 2**fbits - 1))
             end if
-            word = ior(shiftl(biased, fbits), mantissa)
         end if
         word = ior(word, sign_bit)
-        ! Avoid out-of-range integer conversion on processors with checking.
         if (word >= 32768) word = word - 65536
         bits = int(word, int16)
+    end function
+
+    pure integer(int64) function round_shift(value, shift) result(rounded)
+        !! Exact integer guard/round/sticky decision, nearest with ties to even.
+        integer(int64), intent(in) :: value
+        integer, intent(in) :: shift
+        integer(int64) :: discarded, halfway
+        rounded = 0
+        if (shift > 53) return
+        rounded = shiftr(value, shift)
+        halfway = shiftl(1_int64, shift - 1)
+        discarded = iand(value, shiftl(1_int64, shift) - 1)
+        if (discarded > halfway .or. &
+            (discarded == halfway .and. btest(rounded, 0))) rounded = rounded + 1
     end function
 
     pure function unpack16(bits, ebits, fbits) result(x)
         integer(int16), intent(in) :: bits
         integer, intent(in) :: ebits, fbits
         real(real64) :: x
-        integer :: word, biased, mantissa, bias
+        integer(int64) :: raw
+        integer :: word, biased, mantissa, bias, leading
         word = iand(int(bits), 65535)
         biased = iand(shiftr(word, fbits), 2**ebits - 1)
         mantissa = iand(word, 2**fbits - 1)
         bias = 2**(ebits - 1) - 1
+        raw = 0
         if (biased == 2**ebits - 1) then
-            x = ieee_value(0.0_real64, ieee_positive_inf)
-            if (mantissa /= 0) x = ieee_value(x, ieee_quiet_nan)
-        else if (biased == 0) then
-            x = scale(real(mantissa, real64), 1 - bias - fbits)
-        else
-            x = scale(real(2**fbits + mantissa, real64), biased - bias - fbits)
+            raw = shiftl(2047_int64, 52)
+            if (mantissa /= 0) raw = ibset(raw, 51)
+        else if (biased > 0) then
+            raw = ior(shiftl(int(biased - bias + 1023, int64), 52), &
+                shiftl(int(mantissa, int64), 52 - fbits))
+        else if (mantissa > 0) then
+            leading = bit_size(mantissa) - leadz(mantissa) - 1
+            raw = ior(shiftl(int(leading + 1 - bias - fbits + 1023, int64), 52), &
+                shiftl(int(mantissa - 2**leading, int64), 52 - leading))
         end if
-        if (btest(word, 15)) x = -x
+        if (btest(word, 15)) raw = ibset(raw, 63)
+        x = transfer(raw, x)
     end function
 end module fortgen_storage

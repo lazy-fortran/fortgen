@@ -48,5 +48,13 @@ program test_precision_storage
             if (abs(q-x) > quantum/2) error stop 'independent half error bound'
         end do
     end do
+    do e=-135,126
+        quantum = scale(1.0_real64, max(e-7,-133))
+        do i=1,257
+            x = scale(1.0_real64+real(i,real64)/258, e)
+            q = unpack_bf16(pack_bf16(x))
+            if (abs(q-x) > quantum/2) error stop 'independent bf16 error bound'
+        end do
+    end do
     print *, 'IEEE storage: exhaustive roundtrips and independent error bounds PASS'
 end program
