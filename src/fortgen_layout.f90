@@ -51,6 +51,9 @@ contains
                     sentinel = line(:5)
                     call put_wrapped(out, indent, line, &
                         continuation=sentinel//"& ")
+                else if (index(line, "!GCC$") == 1) then
+                    ! GCC attributes have no free-form continuation syntax.
+                    call out%line(indent//line)
                 else if (line(:1) == "!") then
                     room = DEFAULT_LINE_LIMIT - len(indent)
                     do while (len(line) > room)
@@ -67,6 +70,14 @@ contains
             first = last + 1
         end do
         wrapped = out%str()
+        first = 1
+        do while (first <= len(wrapped))
+            last = index(wrapped(first:), new_line("a"))
+            if (last == 0) last = len(wrapped) - first + 2
+            if (last - 1 > 132) &
+                error stop "Fortran layout: unbreakable token exceeds 132 columns"
+            first = first + last
+        end do
     end function wrap_fortran_source
 
     subroutine put_wrapped(b, indent, line, limit, continuation)
@@ -106,12 +117,7 @@ contains
                 ! so is splitting a token, and a single unbreakable token is the
                 ! generator's problem to report rather than this module's to
                 ! silently corrupt.
-                ! A long atomic token or literal cannot be continued without
-                ! changing its spelling. Allow it up to the language limit;
-                ! refuse impossible source rather than splitting that token.
-                if (len(indent) + len(prefix) + remaining > 132) &
-                    error stop "Fortran layout: unbreakable token exceeds 132 columns"
-                call b%line(indent//prefix//line(start:))
+                call b%line(indent//line(start:))
                 return
             end if
             if (start == 1) then
