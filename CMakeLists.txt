@@ -24,6 +24,7 @@ add_library(fortgen)
 target_link_libraries(fortgen PUBLIC fortgen_runtime)
 add_library(fortgen::fortgen ALIAS fortgen)
 target_sources(fortgen PRIVATE
+    src/fortgen_expr_ir.f90
     src/fortgen_string.f90
     src/fortgen_buffer.f90
     src/fortgen_layout.f90
@@ -194,4 +195,17 @@ if(FORTGEN_BUILD_TESTING)
         ${CMAKE_CURRENT_BINARY_DIR}/precision_family.f90)
     target_link_libraries(test_precision_kernel PRIVATE fortgen)
     add_test(NAME precision_kernel COMMAND test_precision_kernel)
+endif()
+
+if(FORTGEN_BUILD_TESTING)
+    add_executable(test_expr_ir test/test_expr_ir.f90)
+    target_link_libraries(test_expr_ir PRIVATE fortgen)
+    add_test(NAME test_expr_ir COMMAND test_expr_ir)
+endif()
+if(FORTGEN_BUILD_TESTING AND Python3_Interpreter_FOUND)
+    add_test(NAME test_expr_adapter_differential
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_expr_adapter.py
+            $<TARGET_FILE:test_expr_ir>)
+    set_tests_properties(test_expr_adapter_differential PROPERTIES
+        SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/python")
 endif()
