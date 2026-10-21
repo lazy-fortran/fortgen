@@ -3,7 +3,7 @@ program fortgen_codegen
     use fortgen_ir_text, only: read_kernel_ir_file
     use fortgen_kernel_ir, only: kernel_ir_t
     use fortgen_kernel_emit, only: kernel_emit_spec_t, emit_fortran_kernel_ir, &
-        emit_cuda_device_ir, emit_python_kernel_ir, TARGET_CUDA, TARGET_DEFAULT
+        emit_cuda_device_ir, emit_cuda_batch_ir, emit_python_kernel_ir, TARGET_CUDA, TARGET_DEFAULT
     use fortgen_string, only: str_t, chars
     implicit none
 
@@ -18,7 +18,7 @@ program fortgen_codegen
 
     narg = command_argument_count()
     if (narg < 2 .or. narg > 3) then
-        write(error_unit, "(a)") "usage: fortgen-codegen fortran|cuda|python INPUT [OUTPUT]"
+        write(error_unit, "(a)") "usage: fortgen-codegen fortran|cuda|cuda-batch|python INPUT [OUTPUT]"
         error stop 2
     end if
     call get_command_argument(1, backend)
@@ -38,11 +38,14 @@ program fortgen_codegen
     case ("cuda")
         spec%target = TARGET_CUDA
         source = emit_cuda_device_ir(ir, spec, ok, message)
+    case ("cuda-batch")
+        spec%target = TARGET_CUDA
+        source = emit_cuda_batch_ir(ir, spec, ok, message)
     case ("python")
         spec%target = TARGET_DEFAULT
         source = emit_python_kernel_ir(ir, spec, ok, message)
     case default
-        write(error_unit, "(a)") "fortgen-codegen: backend must be fortran, cuda or python"
+        write(error_unit, "(a)") "fortgen-codegen: backend must be fortran, cuda, cuda-batch or python"
         error stop 2
     end select
     if (.not. ok) then

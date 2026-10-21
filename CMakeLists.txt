@@ -130,7 +130,17 @@ if(FORTGEN_BUILD_TESTING)
                 ${CMAKE_CURRENT_SOURCE_DIR}/test/python_kernel.fgir)
         set_tests_properties(python_kernel PROPERTIES SKIP_RETURN_CODE 77)
     endif()
+    foreach(precision real64 real32 mixed)
+        configure_file(test/device/batch.fgir.in
+            ${CMAKE_CURRENT_BINARY_DIR}/batch_${precision}.fgir @ONLY)
+        add_test(NAME cuda_batch_emit_${precision} COMMAND fortgen-codegen cuda-batch
+            ${CMAKE_CURRENT_BINARY_DIR}/batch_${precision}.fgir
+            ${CMAKE_CURRENT_BINARY_DIR}/batch_emit_${precision}.cuh)
+    endforeach()
     if(FORTGEN_BUILD_CUDA_TESTING)
+        if(NOT CMAKE_CUDA_ARCHITECTURES)
+            message(FATAL_ERROR "Set an explicit CMAKE_CUDA_ARCHITECTURES list")
+        endif()
         enable_language(CUDA)
         add_custom_command(
             OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/behavior_kernel.cuh
@@ -147,6 +157,25 @@ if(FORTGEN_BUILD_TESTING)
         set_target_properties(test_cuda_kernel PROPERTIES
             CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
         add_test(NAME cuda_kernel COMMAND test_cuda_kernel)
+        foreach(precision real64 real32 mixed)
+            configure_file(test/device/batch.fgir.in
+                ${CMAKE_CURRENT_BINARY_DIR}/batch_${precision}.fgir @ONLY)
+            add_custom_command(
+                OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/batch_${precision}.cuh
+                COMMAND $<TARGET_FILE:fortgen-codegen> cuda-batch
+                    ${CMAKE_CURRENT_BINARY_DIR}/batch_${precision}.fgir
+                    ${CMAKE_CURRENT_BINARY_DIR}/batch_${precision}.cuh
+                DEPENDS fortgen-codegen
+                    ${CMAKE_CURRENT_BINARY_DIR}/batch_${precision}.fgir VERBATIM)
+        endforeach()
+        add_executable(test_cuda_batch test/device/test_cuda_batch.cu
+            ${CMAKE_CURRENT_BINARY_DIR}/batch_real64.cuh
+            ${CMAKE_CURRENT_BINARY_DIR}/batch_real32.cuh
+            ${CMAKE_CURRENT_BINARY_DIR}/batch_mixed.cuh)
+        target_include_directories(test_cuda_batch PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+        set_target_properties(test_cuda_batch PROPERTIES
+            CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+        add_test(NAME cuda_batch COMMAND test_cuda_batch)
         add_custom_command(
             OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/reciprocal_kernel.cuh
             COMMAND $<TARGET_FILE:fortgen-codegen> cuda
