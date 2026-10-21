@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   build-test:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || (github.event_name == 'schedule' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && fromJSON('["self-hosted","itp-slurm"]') || fromJSON('["self-hosted","itp-build"]') }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && fromJSON('["self-hosted","itp-ubuntu24"]') || (github.event_name == 'schedule' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && fromJSON('["self-hosted","itp-slurm"]') || fromJSON('["self-hosted","itp-build"]') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -40,7 +40,9 @@ jobs:
         run: |-
           sci-dispatch native "$RUNNER_TEMP/ci.tar.zst"
       - name: Install gfortran
-        run: sudo apt-get update && sudo apt-get install -y gfortran
+        run: |
+          echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          sudo apt-get update && sudo apt-get install -y gfortran
         if: ${{ github.event.pull_request.head.repo.fork }}
       - uses: fortran-lang/setup-fpm@v7
         if: ${{ github.event.pull_request.head.repo.fork }}
