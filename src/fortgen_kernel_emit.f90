@@ -26,6 +26,7 @@ module fortgen_kernel_emit
 
     public :: kernel_emission_policy_t, kernel_emit_spec_t
     public :: emit_fortran_kernel_ir, emit_cuda_device_ir, emit_python_kernel_ir
+    public :: emit_cuda_batch_ir
     public :: TARGET_DEFAULT, TARGET_FORTRAN_CPU
     public :: TARGET_FORTRAN_OPENMP_TARGET, TARGET_FORTRAN_OPENACC
     public :: TARGET_FORTRAN_OPENMP_TARGET_AND_OPENACC, TARGET_CUDA
@@ -122,6 +123,67 @@ contains
         end if
         source = emit_source(prepared, spec, BACKEND_CUDA)
     end function emit_cuda_device_ir
+
+    function emit_cuda_batch_ir(ir, spec, ok, message) result(source)
+        !! Packed structure-of-arrays boundary: field j starts at j*n.
+        !! The caller owns allocation, stream, launch geometry and reductions.
+        type(kernel_ir_t), intent(in) :: ir
+        type(kernel_emit_spec_t), intent(in) :: spec
+        logical, intent(out) :: ok
+        character(:), allocatable, intent(out) :: message
+        type(str_t) :: source, leaf
+        type(strbuf_t) :: b
+        character(:), allocatable :: input_type, output_type, name
+        integer :: j
+
+        source = str('')
+        leaf = emit_cuda_device_ir(ir, spec, ok, message)
+        if (.not. ok) return
+        name = chars(spec%name)
+        ok = .false.
+        message = 'CUDA batch name exceeds 63 characters with _batch suffix'
+        if (len(name) > 57) return
+        input_type = 'double'
+        output_type = 'double'
+        if (spec%precision /= PRECISION_REAL64) input_type = 'float'
+        if (spec%precision == PRECISION_REAL32) output_type = 'float'
+        call b%append('#include <cstddef>')
+        call b%newline()
+        call b%append('#include <cmath>')
+        call b%newline()
+        call b%append(chars(leaf))
+        call b%newline()
+        call b%append('static __global__ void '//name//'_batch(')
+        call b%newline()
+        call b%append('    std::size_t n, const '//input_type// &
+            '* inputs, '//output_type//'* outputs) {')
+        call b%newline()
+        call b%append('    const std::size_t i = std::size_t(blockIdx.x)'// &
+            '*blockDim.x + threadIdx.x;')
+        call b%newline()
+        call b%append('    if (i >= n) return;')
+        call b%newline()
+        call b%append('    '//name//'(')
+        call b%newline()
+        do j = 1, size(spec%args)
+            call b%append('        inputs['//chars(str(j - 1))//'*n + i]')
+            if (j < size(spec%args) .or. size(spec%outputs) > 0) &
+                call b%append(',')
+            call b%newline()
+        end do
+        do j = 1, size(spec%outputs)
+            call b%append('        &outputs['//chars(str(j - 1))//'*n + i]')
+            if (j < size(spec%outputs)) call b%append(',')
+            call b%newline()
+        end do
+        call b%append('    );')
+        call b%newline()
+        call b%append('}')
+        call b%newline()
+        source = b%to_str()
+        ok = .true.
+        message = ''
+    end function emit_cuda_batch_ir
 
     !> Emit a self-contained Python function `def name(args):` returning one
     !> value, or a tuple in declared output order. Arithmetic broadcasts over
