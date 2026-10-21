@@ -55,6 +55,11 @@ name = "test_precision_kernel"
 source-dir = "test"
 main = "test_precision_kernel.f90"
 
+[[test]]
+name = "test_expr_ir"
+source-dir = "test"
+main = "test_expr_ir.f90"
+
 [fortran]
 implicit-external = false
 implicit-typing = false
