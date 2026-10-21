@@ -18,7 +18,10 @@ if(FORTGEN_BUILD_CUDA_TESTING AND NOT FORTGEN_BUILD_TESTING)
     message(FATAL_ERROR "FORTGEN_BUILD_CUDA_TESTING requires FORTGEN_BUILD_TESTING")
 endif()
 
+add_subdirectory(runtime)
+
 add_library(fortgen)
+target_link_libraries(fortgen PUBLIC fortgen_runtime)
 add_library(fortgen::fortgen ALIAS fortgen)
 target_sources(fortgen PRIVATE
     src/fortgen_string.f90
@@ -26,9 +29,7 @@ target_sources(fortgen PRIVATE
     src/fortgen_layout.f90
     src/fortgen_banner.f90
     src/fortgen_names.f90
-    src/fortgen_storage.f90
     src/fortgen_precision_emit.f90
-    src/fortgen_precision.f90
     src/fortgen_kernel_target.f90
     src/fortgen_kernel_ir.f90
     src/fortgen_functions.f90

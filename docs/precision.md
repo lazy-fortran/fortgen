@@ -33,3 +33,8 @@ by every compute leaf; half wrappers declare storage, compute and rounding.
 bounds, ties, overflow and subnormals. `precision_kernel` compiles regenerated
 sources and compares values against an independent polynomial, with tolerances
 from input conditioning and unit roundoff. Generated fixtures are byte-checked.
+
+CMake numeric consumers can fetch `SOURCE_SUBDIR runtime` and link
+`fortgen_runtime` (`fortgen::runtime`). That static target contains only format
+identities and conversion routines; it builds no IR or generator executable.
+The full FortGen target publicly links the same runtime.
