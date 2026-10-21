@@ -4,6 +4,9 @@ module fortgen_precision
     private
 
     public :: PRECISION_REAL64, PRECISION_REAL32, PRECISION_MIXED
+    public :: STORAGE_FP64, STORAGE_FP32, STORAGE_FP16, STORAGE_BF16
+    integer, parameter :: STORAGE_FP64=1, STORAGE_FP32=2
+    integer, parameter :: STORAGE_FP16=4, STORAGE_BF16=5
     public :: precision_is_valid, precision_name, precision_from_name
 
     integer, parameter :: PRECISION_REAL64 = 1

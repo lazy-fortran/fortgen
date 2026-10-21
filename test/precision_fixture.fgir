@@ -1,0 +1,12 @@
+fortgen.kernel_ir.v1
+kernel polynomial
+precision real64
+target fortran_cpu
+arg x
+out y 5
+node 1 symbol x
+node 2 literal 1.0
+node 3 add 2 1 2
+node 4 literal 2.0
+node 5 pow 2 3 4
+end

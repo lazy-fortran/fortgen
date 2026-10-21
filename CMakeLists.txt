@@ -18,7 +18,10 @@ if(FORTGEN_BUILD_CUDA_TESTING AND NOT FORTGEN_BUILD_TESTING)
     message(FATAL_ERROR "FORTGEN_BUILD_CUDA_TESTING requires FORTGEN_BUILD_TESTING")
 endif()
 
+add_subdirectory(runtime)
+
 add_library(fortgen)
+target_link_libraries(fortgen PUBLIC fortgen_runtime)
 add_library(fortgen::fortgen ALIAS fortgen)
 target_sources(fortgen PRIVATE
     src/fortgen_string.f90
@@ -26,7 +29,7 @@ target_sources(fortgen PRIVATE
     src/fortgen_layout.f90
     src/fortgen_banner.f90
     src/fortgen_names.f90
-    src/fortgen_precision.f90
+    src/fortgen_precision_emit.f90
     src/fortgen_kernel_target.f90
     src/fortgen_kernel_ir.f90
     src/fortgen_functions.f90
@@ -171,3 +174,24 @@ install(EXPORT fortgenTargets
     FILE fortgenTargets.cmake
     NAMESPACE fortgen::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/fortgen)
+
+if(FORTGEN_BUILD_TESTING)
+    add_executable(test_precision_storage test/test_precision_storage.f90)
+    target_link_libraries(test_precision_storage PRIVATE fortgen)
+    add_test(NAME precision_storage COMMAND test_precision_storage)
+    add_executable(generate_precision_fixture test/generate_precision_fixture.f90)
+    target_link_libraries(generate_precision_fixture PRIVATE fortgen)
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/precision_family.f90
+        COMMAND generate_precision_fixture
+            ${CMAKE_CURRENT_SOURCE_DIR}/test/precision_fixture.fgir
+            ${CMAKE_CURRENT_BINARY_DIR}/precision_family.f90
+        COMMAND ${CMAKE_COMMAND} -E compare_files
+            ${CMAKE_CURRENT_BINARY_DIR}/precision_family.f90
+            ${CMAKE_CURRENT_SOURCE_DIR}/test/precision_family.f90
+        DEPENDS generate_precision_fixture test/precision_fixture.fgir
+            test/precision_family.f90 VERBATIM)
+    add_executable(test_precision_kernel test/test_precision_kernel.f90
+        ${CMAKE_CURRENT_BINARY_DIR}/precision_family.f90)
+    target_link_libraries(test_precision_kernel PRIVATE fortgen)
+    add_test(NAME precision_kernel COMMAND test_precision_kernel)
+endif()
