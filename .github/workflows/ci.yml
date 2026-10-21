@@ -4,28 +4,39 @@ on:
   merge_group:
     types: [checks_requested]
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   build-test:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","itp-slurm"]') }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || (github.event_name == 'schedule' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && fromJSON('["self-hosted","itp-slurm"]') || fromJSON('["self-hosted","itp-build"]') }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Run native checks in the build container
+        if: ${{ !github.event.pull_request.head.repo.fork && !(github.event_name == 'schedule' || contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
+        run: |-
+          ci/run.sh ci-build-test
       - name: Bundle exact sources for Slurm
-        if: ${{ !github.event.pull_request.head.repo.fork }}
+        if: ${{ !github.event.pull_request.head.repo.fork && (github.event_name == 'schedule' || contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
         env:
           SCI_TIER: ci-build-test
         run: |-
           TMPDIR="$RUNNER_TEMP" ci/bundle.sh "$RUNNER_TEMP/ci.tar.zst"
       - name: Run native checks on sCluster
-        if: ${{ !github.event.pull_request.head.repo.fork }}
+        if: ${{ !github.event.pull_request.head.repo.fork && (github.event_name == 'schedule' || contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
         run: |-
           sci-dispatch native "$RUNNER_TEMP/ci.tar.zst"
       - name: Install gfortran
@@ -47,7 +58,7 @@ jobs:
         if: ${{ github.event.pull_request.head.repo.fork }}
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: '3.12'
         if: ${{ github.event.pull_request.head.repo.fork }}
       - name: Test direct SymPy frontend through installed FortGen backend
         run: |
@@ -56,3 +67,8 @@ jobs:
           export PATH="$PWD/.local/bin:$PATH"
           pytest -q python/test
         if: ${{ github.event.pull_request.head.repo.fork }}
+    if: >-
+      github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.actor != 'github-merge-queue[bot]') || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-ci'))
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || format('{0}-{1}', github.ref, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
