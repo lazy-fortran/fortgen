@@ -4,7 +4,7 @@ program test_expr_ir
     type(expr_ir_t) :: ir, restored
     character(:), allocatable :: why, text, expected, actual
     logical :: ok
-    integer :: a,b,c,x,r,unit,k
+    integer :: a,b,c,x,r,unit,k,u,builtin
     character(1024) :: path
     call ir%init(20)
     a=ir%add('integer','9007199254740993',[integer::],ok,why)
@@ -16,6 +16,10 @@ program test_expr_ir
     if (.not. ok) error stop 'escaped symbol'
     r=ir%add('mul','',[c,x],ok,why)
     if (.not. ok) error stop 'shared expression'
+    u=ir%add('uninterpreted','sin',[x],ok,why)
+    if (.not. ok) error stop 'uninterpreted name collision'
+    builtin=ir%add('function','sin',[x],ok,why)
+    if (.not. ok) error stop 'builtin sine'
     text=ir%serialize()
     if (command_argument_count()>0) then
         call get_command_argument(1,path)
@@ -37,6 +41,8 @@ program test_expr_ir
     if (restored%nodes(a)%text /= '9007199254740993') error stop 'rounded integer'
     r=ir%add('symbol',"x'\n",[integer::],ok,why,0,'local')
     if (ok) error stop 'scope conflict'
+    r=ir%add('function','sin',[x,x],ok,why)
+    if (ok) error stop 'invalid builtin arity accepted'
     r=ir%add('pow','',[99,1],ok,why)
     if (ok) error stop 'forward reference'
     call read_expr_ir('fortgen-expr-ir 2'//new_line('a'),restored,ok,why)

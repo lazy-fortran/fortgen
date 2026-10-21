@@ -13,17 +13,28 @@ with tempfile.TemporaryDirectory() as tmp:
     path = Path(tmp) / 'native.expr'
     subprocess.run([sys.argv[1], str(path)], check=True, capture_output=True, text=True)
     nodes = loads(path.read_text())
-    expression = to_sympy(nodes)
+    expression = to_sympy(nodes, 5)
     x = sp.Symbol("@5:local:x'\\n", real=True, positive=True)
     assert sp.simplify(expression - sp.Rational(9007199254740993, 10)*x) == 0
     assert expression.coeff(x) * 10 == 9007199254740993
     assert dumps(loads(dumps(nodes))) == dumps(nodes)
+    undefined = to_sympy(nodes, 6)
+    builtin = to_sympy(nodes, 7)
+    assert undefined.func == sp.Function('sin')
+    assert builtin.func == sp.sin
+    assert undefined.subs(x, sp.pi/2) != 1  # remains unevaluated
+    assert builtin.subs(x, sp.pi/2) == 1
 
 x = sp.Symbol('x', positive=True)
 original = (x + sp.Rational(1, 10))**3 + sp.Integer(9007199254740993)
 nodes, root = from_sympy(original)
 assert sp.simplify(to_sympy(nodes, root) - original) == 0
 assert to_sympy(nodes, root).subs(x, 2) == sp.Rational(9007199254741002261, 1000)
+undefined = sp.Function('sin')(x)
+nodes, root = from_sympy(undefined + sp.sin(x))
+assert to_sympy(nodes, root) == undefined + sp.sin(x)
+assert undefined.subs(x, 0) != 0  # no definition was supplied
+assert to_sympy(*from_sympy(undefined)).subs(x, 0) == undefined.subs(x, 0)
 for bad in ('fortgen-expr-ir 2\n',
             "fortgen-expr-ir 1\n1 integer '01' '' 0\n",
             "fortgen-expr-ir 1\n1 pow '' '' 0 1 2\n",

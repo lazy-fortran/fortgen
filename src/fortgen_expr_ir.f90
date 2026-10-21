@@ -203,8 +203,14 @@ contains
             if (size(args) < 1 .or. len(text) /= 0) return
         case('pow')
             if (size(args) /= 2 .or. len(text) /= 0) return
-        case('function')
+        case('function','uninterpreted')
             if (len(text) == 0) return
+            if (tag=='function') then
+                select case(text)
+                case('sin','cos','tan','exp','log','sqrt','Abs','sign','conjugate')
+                    if (size(args)/=1) return
+                end select
+            end if
         case default
             why = 'exact Expr IR: unsupported node '//tag
             return
@@ -305,6 +311,8 @@ contains
         case('add'); head='sp.Add'
         case('mul'); head='sp.Mul'
         case('pow'); head='sp.Pow'
+        case('uninterpreted')
+            head='sp.Function('//python_string(self%nodes(id)%text)//')'
         case('function')
             select case(self%nodes(id)%text)
             case('sin','cos','tan','exp','log','sqrt','Abs','sign','conjugate')

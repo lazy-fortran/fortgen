@@ -93,8 +93,10 @@ def loads(text, *, max_nodes=10000):
             valid = not text_value and bool(args)
         elif tag == 'pow':
             valid = not text_value and len(args) == 2
-        elif tag == 'function':
+        elif tag in ('function', 'uninterpreted'):
             valid = bool(text_value)
+            if tag == 'function' and text_value in FUNCTIONS:
+                valid = valid and len(args) == 1
         if not valid or tag != 'symbol' and facts:
             raise ValueError('unsupported or malformed node')
         depth = 1 + max((depths[j-1] for j in args), default=0)
@@ -139,7 +141,9 @@ def from_sympy(expression, *, scope=''):
             n = Node('mul', args=args)
         elif isinstance(e, sp.Pow):
             n = Node('pow', args=args)
-        elif isinstance(e, AppliedUndef) or e.func.__name__ in FUNCTIONS:
+        elif isinstance(e, AppliedUndef):
+            n = Node('uninterpreted', e.func.__name__, args=args)
+        elif e.func.__name__ in FUNCTIONS:
             n = Node('function', e.func.__name__, args=args)
         else:
             raise ValueError('unsupported exact expression: ' + type(e).__name__)
@@ -170,8 +174,9 @@ def to_sympy(nodes, root=None):
                 facts.update(positive=True, integer=True)
             name = n.text if n.scope == '' else f'@{len(n.scope)}:{n.scope}:{n.text}'
             value = sp.Symbol(name, **facts)
-        elif n.tag == 'function':
-            head = getattr(sp, n.text) if n.text in FUNCTIONS else sp.Function(n.text)
+        elif n.tag in ('function', 'uninterpreted'):
+            head = (getattr(sp, n.text) if n.tag == 'function' and n.text in FUNCTIONS
+                    else sp.Function(n.text))
             value = head(*args)
         else:
             value = {'add':sp.Add, 'mul':sp.Mul, 'pow':sp.Pow}[n.tag](*args)
