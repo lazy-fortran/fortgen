@@ -34,6 +34,7 @@ target_sources(fortgen PRIVATE
     src/fortgen_kernel_target.f90
     src/fortgen_kernel_ir.f90
     src/fortgen_functions.f90
+    src/fortgen_tensor_emit.f90
     src/fortgen_kernel_emit.f90
     src/fortgen_ir_text.f90
 )
@@ -253,4 +254,8 @@ if(FORTGEN_BUILD_TESTING AND Python3_Interpreter_FOUND)
             $<TARGET_FILE:test_expr_ir>)
     set_tests_properties(test_expr_adapter_differential PROPERTIES
         SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/python")
+endif()
+
+if(FORTGEN_BUILD_TESTING)
+    include(test/tensor/tests.cmake)
 endif()

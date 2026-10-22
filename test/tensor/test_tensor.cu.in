@@ -1,0 +1,134 @@
+#include <cuda_runtime.h>
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <vector>
+@cuda_includes@
+using T = @ctype@;
+static void check(cudaError_t e) {
+    if(e!=cudaSuccess) { std::fprintf(stderr,"CUDA: %s\n",cudaGetErrorString(e));
+        std::exit(1); }
+}
+static int power(int n,int d) { int v=1; while(d--) v*=n; return v; }
+static void apply(int key,int nc,int nt,const T* u,const T* b,const T* db,
+                  const T* coef,T* y) {
+    switch(key) {
+@cuda_cases@
+    default: std::abort();
+    }
+    check(cudaGetLastError());
+}
+int main(int argc,char** argv) {
+    const bool bench=argc>1 && !std::strcmp(argv[1],"--benchmark");
+    int key=0; long double worst=0;
+    for(int d=2;d<=3;++d) for(int p=1;p<=8;++p)
+    for(int extra=0;extra<=1;++extra) for(int tables=0;tables<=1;++tables) {
+        ++key;
+        if(bench && (d!=3 || extra || tables)) continue;
+        const int n=p+1,nq=n+extra,nd=power(n,d),nqv=power(nq,d),ch=d+1;
+        const int nc=8, nm=n*nq*d, ntables=tables?nc:1;
+        const int threads=((power(std::max(n,nq),d)+31)/32)*32;
+        std::vector<T> u(nc*nd), b(ntables*nm),db(b.size()),coef(nc*nqv*ch*ch);
+        std::vector<T> y(nc*nd);
+        for(int c=0;c<ntables;++c) for(int a=0;a<d;++a)
+        for(int i=0;i<n;++i) for(int q=0;q<nq;++q) {
+            int idx=c*nm+a*n*nq+i*nq+q;
+            b[idx]=(1.1+std::sin(double(q+1+2*(i+1)+3*(a+1)+c+1)))/n;
+            db[idx]=std::cos(double(2*(q+1)+i+1+2*(a+1)+3*(c+1)))/n;
+        }
+        for(int c=0;c<nc;++c) {
+            for(int i=0;i<nd;++i) u[c*nd+i]=std::sin(double(3*(c+1)+i+1));
+            for(int h=0;h<ch*ch;++h) for(int q=0;q<nqv;++q)
+                coef[(c*ch*ch+h)*nqv+q]=
+                    (1.2+std::sin(double(c+1+q+1+2*(h+1))))/ch;
+        }
+        T *du,*dy,*bb,*dd,*cc;
+        check(cudaMalloc(&du,u.size()*sizeof(T)));
+        check(cudaMalloc(&dy,y.size()*sizeof(T)));
+        check(cudaMalloc(&bb,b.size()*sizeof(T)));
+        check(cudaMalloc(&dd,db.size()*sizeof(T)));
+        check(cudaMalloc(&cc,coef.size()*sizeof(T)));
+        check(cudaMemcpy(du,u.data(),u.size()*sizeof(T),cudaMemcpyHostToDevice));
+        check(cudaMemcpy(bb,b.data(),b.size()*sizeof(T),cudaMemcpyHostToDevice));
+        check(cudaMemcpy(dd,db.data(),db.size()*sizeof(T),cudaMemcpyHostToDevice));
+        check(cudaMemcpy(cc,coef.data(),coef.size()*sizeof(T),cudaMemcpyHostToDevice));
+        apply(key,nc,threads,du,bb,dd,cc,dy);
+        check(cudaDeviceSynchronize());
+        check(cudaMemcpy(y.data(),dy,y.size()*sizeof(T),cudaMemcpyDeviceToHost));
+        long double err=0;
+        for(int c=0;c<nc;++c) {
+            std::vector<long double> dense(ch*nd*nqv),v(ch*nqv,0),f(ch*nqv,0);
+            for(int h=0;h<ch;++h) for(int i=0;i<nd;++i)
+            for(int q=0;q<nqv;++q) {
+                int ii=i,qq=q; long double value=1;
+                for(int a=0;a<d;++a) {
+                    int idx=(tables?c*nm:0)+a*n*nq+(ii%n)*nq+qq%nq;
+                    value*=h==a+1?db[idx]:b[idx]; ii/=n; qq/=nq;
+                }
+                dense[(h*nd+i)*nqv+q]=value;
+                v[h*nqv+q]+=value*u[c*nd+i];
+            }
+            for(int h=0;h<ch;++h) for(int a=0;a<ch;++a)
+            for(int q=0;q<nqv;++q)
+                f[h*nqv+q]+=coef[(c*ch*ch+h*ch+a)*nqv+q]*v[a*nqv+q];
+            long double scale=1e-30L,diff=0;
+            for(int i=0;i<nd;++i) {
+                long double ref=0;
+                for(int h=0;h<ch;++h) for(int q=0;q<nqv;++q)
+                    ref+=dense[(h*nd+i)*nqv+q]*f[h*nqv+q];
+                if(!std::isfinite(y[c*nd+i])) std::abort();
+                scale=std::max(scale,std::abs(ref));
+                diff=std::max(diff,std::abs(ref-y[c*nd+i]));
+            }
+            err=std::max(err,diff/scale);
+        }
+        worst=std::max(worst,err);
+        if(err>@tol@L) {
+            std::fprintf(stderr,"failed d=%d p=%d extra=%d tables=%d error=%Lg\n",
+                         d,p,extra,tables,err); return 1;
+        }
+        if(bench) {
+            // A short GPU run. Use enough independent cells to occupy the device.
+            const int cells=256,reps=20;
+            std::vector<T> bu(cells*nd),bc(cells*nqv*ch*ch);
+            for(int c=0;c<cells;++c) {
+                std::copy(u.begin(),u.begin()+nd,bu.begin()+c*nd);
+                std::copy(coef.begin(),coef.begin()+nqv*ch*ch,
+                          bc.begin()+c*nqv*ch*ch);
+            }
+            check(cudaFree(du)); check(cudaFree(cc)); check(cudaFree(dy));
+            check(cudaMalloc(&du,bu.size()*sizeof(T)));
+            check(cudaMalloc(&cc,bc.size()*sizeof(T)));
+            check(cudaMalloc(&dy,bu.size()*sizeof(T)));
+            check(cudaMemcpy(du,bu.data(),bu.size()*sizeof(T),cudaMemcpyHostToDevice));
+            check(cudaMemcpy(cc,bc.data(),bc.size()*sizeof(T),cudaMemcpyHostToDevice));
+            apply(key,cells,threads,du,bb,dd,cc,dy);
+            cudaEvent_t a,z; check(cudaEventCreate(&a)); check(cudaEventCreate(&z));
+            check(cudaEventRecord(a));
+            for(int r=0;r<reps;++r) apply(key,cells,threads,du,bb,dd,cc,dy);
+            check(cudaEventRecord(z)); check(cudaEventSynchronize(z));
+            float ms; check(cudaEventElapsedTime(&ms,a,z));
+            std::vector<T> result(cells*nd);
+            check(cudaMemcpy(result.data(),dy,result.size()*sizeof(T),
+                             cudaMemcpyDeviceToHost));
+            for(int c=0;c<cells;++c) for(int i=0;i<nd;++i)
+                if(result[c*nd+i]!=y[i]) std::abort();
+            double fw=0,bw=0;
+            for(int a=1;a<=d;++a) {
+                fw+=2.*n*power(nq,a)*power(n,d-a);
+                bw+=2.*nq*power(n,a)*power(nq,d-a);
+            }
+            double flops=ch*(fw+bw)+ch*(2*d+1.)*nqv+ch*nd;
+            std::printf("gpu,@bits@,%d,%d,%d,%d,%.9Lg,%.9g,%.9g,%.9g\n",p,
+                        threads,cells*nd,reps,err,ms/1000.,
+                        flops*cells*reps/(ms/1000.)/1e9,
+                        double(cells)*nd*reps/(ms/1000.));
+            check(cudaEventDestroy(a)); check(cudaEventDestroy(z));
+        }
+        check(cudaFree(du)); check(cudaFree(dy)); check(cudaFree(bb));
+        check(cudaFree(dd)); check(cudaFree(cc));
+    }
+    std::printf("tensor CUDA real@bits@: max relative infinity error %.9Lg\n",worst);
+}

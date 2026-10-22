@@ -1,0 +1,174 @@
+program test_tensor
+    use, intrinsic :: iso_fortran_env, only: real32, real64, int64
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    use omp_lib, only: omp_get_max_threads
+@tensor_uses@
+    implicit none
+    integer, parameter :: rk = @rk@, batch = 8
+    integer :: d, p, extra, tables, key, nc, i, q, a, c, h, r, nt, n, nq
+    integer :: nd, nqv, axis, ii, jj, it, ib, nb, reps
+    integer(int64) :: start, finish, clock_rate
+    real(rk), allocatable :: u(:,:), y(:,:), b(:,:,:,:), db(:,:,:,:), coef(:,:,:)
+    real(real64), allocatable :: dense(:,:,:), v(:,:), f(:,:), ref(:)
+    real(rk), allocatable :: ub(:,:,:), yb(:,:,:), cb(:,:,:,:)
+    real(real64) :: value, err, worst, elapsed, flops, forward, backward
+    character(32) :: arg
+    logical :: benchmark
+    call get_command_argument(1, arg)
+    benchmark = trim(arg) == '--benchmark'
+    worst = 0
+    key = 0
+    do d = 2, 3
+        do p = 1, 8
+            do extra = 0, 1
+                do tables = 0, 1
+                    key = key + 1
+                    if (benchmark) then
+                        if (d /= 3 .or. extra /= 0 .or. tables /= 0) cycle
+                    end if
+                    n = p+1
+                    nq = n+extra
+                    nd = n**d
+                    nqv = nq**d
+                    nc = 3
+                    nt = 1
+                    if (tables == 1) nt = batch
+                    allocate(u(batch,nd), y(batch,nd), b(nq,n,d,nt), &
+                        db(nq,n,d,nt), coef(batch,nqv,(d+1)**2))
+                    do c = 1, nt
+                        do axis = 1, d
+                            do i = 1, n
+                                do q = 1, nq
+                                    b(q,i,axis,c) = real((1.1_real64 + &
+                                        sin(real(q+2*i+3*axis+c, real64)))/n, rk)
+                                    db(q,i,axis,c) = real(cos(real(2*q+i+ &
+                                        2*axis+3*c, real64))/n, rk)
+                                end do
+                            end do
+                        end do
+                    end do
+                    do c = 1, batch
+                        do i = 1, nd
+                            u(c,i) = real(sin(real(3*c+i,real64)),rk)
+                        end do
+                        do h = 1, (d+1)**2
+                            do q = 1, nqv
+                                coef(c,q,h) = real((1.2_real64 + &
+                                    sin(real(c+q+2*h,real64)))/(d+1),rk)
+                            end do
+                        end do
+                    end do
+                    y = -123
+                    call apply(key, 0, u, b, db, coef, y)
+                    if (any(y /= -123)) error stop 'empty batch wrote output'
+                    call apply(key, nc, u, b, db, coef, y)
+                    if (any(y(nc+1:,:) /= -123)) error stop 'partial batch overrun'
+                    nc = batch
+                    call apply(key, nc, u, b, db, coef, y)
+                    ! Independent dense Kronecker oracle, accumulated in binary64
+                    ! for both precisions, using exactly the rounded input tables.
+                    allocate(dense(nqv,nd,0:d), v(nqv,0:d), f(nqv,0:d), ref(nd))
+                    err = 0
+                    do c = 1, nc
+                        it = 1
+                        if (tables == 1) it = c
+                        do h = 0, d
+                            do i = 0, nd-1
+                                do q = 0, nqv-1
+                                    value = 1
+                                    ii = i
+                                    jj = q
+                                    do axis = 1, d
+                                        if (axis == h) then
+                                            value = value*real(db(mod(jj,nq)+1, &
+                                                mod(ii,n)+1,axis,it),real64)
+                                        else
+                                            value = value*real(b(mod(jj,nq)+1, &
+                                                mod(ii,n)+1,axis,it),real64)
+                                        end if
+                                        ii = ii/n
+                                        jj = jj/nq
+                                    end do
+                                    dense(q+1,i+1,h) = value
+                                end do
+                            end do
+                            v(:,h) = matmul(dense(:,:,h), real(u(c,:),real64))
+                        end do
+                        f = 0
+                        do h = 0, d
+                            do a = 0, d
+                                f(:,h) = f(:,h) + &
+                                    real(coef(c,:,(d+1)*h+a+1),real64)*v(:,a)
+                            end do
+                        end do
+                        ref = 0
+                        do h = 0, d
+                            ref = ref + matmul(transpose(dense(:,:,h)), f(:,h))
+                        end do
+                        if (.not. all(ieee_is_finite(y(c,:)))) &
+                            error stop 'nonfinite output'
+                        err = max(err, maxval(abs(real(y(c,:),real64)-ref))/ &
+                            max(1.0e-30_real64,maxval(abs(ref))))
+                    end do
+                    worst = max(worst,err)
+                    if (err > @tol@_real64) then
+                        print *, 'failed d,p,extra,tables,error:', d,p,extra,tables,err
+                        error stop 'dense tensor oracle'
+                    end if
+                    if (benchmark) then
+                        ! Caller owns OpenMP over batches. Each output is disjoint.
+                        nb = max(16, 32768/(batch*nd))
+                        reps = max(1, 500000/(nb*batch*nd))
+                        allocate(ub(batch,nd,nb),yb(batch,nd,nb), &
+                            cb(batch,nqv,(d+1)**2,nb))
+                        do ib = 1, nb
+                            ub(:,:,ib) = u
+                            cb(:,:,:,ib) = coef
+                        end do
+                        call system_clock(start, clock_rate)
+                        do r = 1, reps
+                            !$omp parallel do private(ib) schedule(static)
+                            do ib = 1, nb
+                                call apply(key,batch,ub(:,:,ib),b,db,cb(:,:,:,ib), &
+                                    yb(:,:,ib))
+                            end do
+                            !$omp end parallel do
+                        end do
+                        call system_clock(finish)
+                        elapsed = real(finish-start,real64)/real(clock_rate,real64)
+                        do ib = 1, nb
+                            if (maxval(abs(yb(:,:,ib)-y)) > @tol@_rk* &
+                                maxval(abs(y))) error stop 'threaded apply mismatch'
+                        end do
+                        forward = 0
+                        backward = 0
+                        do axis = 1, d
+                            forward = forward + 2.0_real64*n*nq**axis*n**(d-axis)
+                            backward = backward + 2.0_real64*nq*n**axis*nq**(d-axis)
+                        end do
+                        flops = (d+1)*(forward+backward) + &
+                            (d+1)*(2*d+1.0_real64)*nqv + (d+1)*nd
+                        print '(a,5(i0,","),5(es16.8,","))', &
+                            'cpu,',@bits@,p,omp_get_max_threads(),nb*batch*nd,reps, &
+                            err,elapsed,flops*nb*batch*reps/elapsed/1e9_real64, &
+                            real(nb*batch*nd,real64)*reps/elapsed,sum(real(yb,real64))
+                        deallocate(ub,yb,cb)
+                    end if
+                    deallocate(u,y,b,db,coef,dense,v,f,ref)
+                end do
+            end do
+        end do
+    end do
+    print *, 'tensor real@bits@: max relative infinity error', worst
+contains
+    subroutine apply(key,nc,u,b,db,coef,y)
+        integer, intent(in) :: key, nc
+        real(rk), intent(in) :: u(batch,*), b(*), db(*), coef(batch,*)
+        real(rk), intent(out) :: y(batch,*)
+        select case(key)
+@tensor_cases@
+        case default
+            error stop 'bad dispatch key'
+        end select
+    end subroutine
+end program
