@@ -108,3 +108,45 @@ multiply-add as two and omit compensation overhead, address arithmetic, copies
 and synchronization. These are apply throughput measurements, not solver rates.
 Use `/usr/bin/time -v` (Linux) or `/usr/bin/time -l` (macOS) to retain wall time
 and peak RSS beside each command, compiler flags and source revision.
+
+## Horner polynomial kernels
+
+`fortgen_horner_emit` emits the evaluation of a tensor-product polynomial
+`p(x) = sum_k c_k prod_j x_j**k_j`, `0 <= k_j <= n_j`, in `d = 1..3` variables,
+together with requested partial derivatives, for one point and `nq` quantities
+that share it. It needs no scalar leaf.
+
+`horner_kernel_spec_t` holds `name`, `dimension`, `degree(1:3)` (0..9), `nq`
+(a positive compile-time count, or 0 for a runtime argument), `max_order`, an
+optional explicit list `orders(dimension, :)` of derivative multi-indices, and
+`target` (`TARGET_FORTRAN_CPU`, `TARGET_FORTRAN_OPENACC` or `TARGET_CUDA`).
+Without `orders`, every derivative of total order up to `max_order` is emitted.
+Invalid input returns empty source, `ok=.false.` and a diagnostic.
+
+```fortran
+source = emit_horner_kernel(spec, ok, message)
+```
+
+The emitted Fortran leaf is the pure subroutine `NAME([nq,] c, x1[, x2, x3], y[, dy, d2y, d3y])`
+with `c(nq, 0:n1[, 0:n2, 0:n3])`, quantity index fastest. `y(nq)` is the value
+and `d<m>y(n_m, nq)` holds the `n_m` requested derivatives of total order `m`,
+ordered by descending multi-index (11, 12, 13, 22, 23, 33 for a Hessian). In one
+dimension every output is `(nq)`. The OpenACC leaf adds `!$acc routine seq`.
+The CUDA leaf is an `extern "C" __device__` function with pointer arguments
+in the same order, `c[iq + nq*(k1 + (n1+1)*(k2 + (n2+1)*k3))]`, and output
+`m` at `d<m>y[slot + n_m*iq]`.
+
+The schedule is nested Horner with direction 1 innermost. Each direction
+carries the truncated Taylor jet `q_a = (1/a!) d^a p/dx^a`, whose Horner step
+`q_a <- q_(a-1) + x*q_a` is one fused multiply-add, so no coefficient is scaled
+inside the recurrence. Only jets that feed a requested output are kept,
+structural zeros are removed while emitting, and the coefficient block is read
+once in descending memory order. The outputs are the jets times `a!`. The code
+is straight-line apart from the quantity loop, with a handful of scalar
+accumulators per direction and no local arrays.
+
+`test_horner` compares 16 kernels (degrees 0 to 6, orders 0 to 3, fixed and
+runtime `nq`, CPU and OpenACC spellings, an explicit order list) at 25 random
+points each with a dense monomial sum in extended precision. The error bound is
+64 ulp of the summed term magnitudes. `test_cuda_horner` repeats the comparison
+on the device under `FORTGEN_BUILD_CUDA_TESTING`.
