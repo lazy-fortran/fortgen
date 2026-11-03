@@ -17,6 +17,9 @@ interfaces may change.
 - CPU precision variants (FP64, FP32, and FP16/BF16 storage) of one kernel.
 - Tensor-product cell schedules around a scalar leaf
   ([spec/tensor-kernels.md](spec/tensor-kernels.md)).
+- Fixed-degree tensor-product polynomial evaluation with fused partial
+  derivatives for Fortran, OpenACC and CUDA
+  ([spec/tensor-kernels.md](spec/tensor-kernels.md#horner-polynomial-kernels)).
 - A bounded exact expression IR, separate from the floating-point kernel IR
   ([spec/expr-ir-v1.md](spec/expr-ir-v1.md)).
 - Text utilities: an append buffer with geometric growth, line continuation
@@ -68,6 +71,7 @@ reference formulas.
 | `fortgen_kernel_target`, `fortgen_precision` | target and precision descriptors |
 | `fortgen_precision_emit`, `fortgen_storage` | CPU precision variants and half-precision codecs |
 | `fortgen_tensor_emit` | tensor-product schedules |
+| `fortgen_horner_emit` | tensor-product Horner evaluation with fused derivatives |
 | `fortgen_expr_ir` | exact expression IR |
 
 ## Documentation
