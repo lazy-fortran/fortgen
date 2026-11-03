@@ -121,6 +121,7 @@ contains
             source = str("")
             return
         end if
+        if (spec%policy%shape_fma) call shape_for_cuda(prepared, spec%precision)
         source = emit_source(prepared, spec, BACKEND_CUDA)
     end function emit_cuda_device_ir
 
@@ -1289,6 +1290,150 @@ contains
         end select
         ok = .true.
     end function render_node
+
+    !> Shape sums and products for left-to-right evaluation by nvcc, which
+    !> neither reassociates nor folds constants across a product. The terms of
+    !> a sum go in the order in which their values become available, so the
+    !> early ones (arguments, values a caller's loop hoists) form the base and
+    !> each later product contracts into the running sum, the latest last.
+    !> The literal factors of a product go last, merged where the merge is
+    !> exact (one of them a signed power of two); the other factors keep their
+    !> order, so prefixes shared between products stay common subexpressions.
+    !> Only the rounding of reordered sums and products changes.
+    subroutine shape_for_cuda(ir, precision)
+        type(kernel_ir_t), intent(inout) :: ir
+        integer, intent(in) :: precision
+        type(kernel_ir_node_t), allocatable :: grown(:)
+        integer, allocatable :: ready(:)
+        integer, allocatable :: factors(:), nodes(:)
+        real(dp), allocatable :: constants(:)
+        integer :: i, j, k, first, n, operand, cost, exponent, kept, literals
+        real(dp) :: factor, value
+        logical :: merged
+
+        allocate (ready(ir%n_nodes), source=0)
+        allocate (nodes(ir%n_operands), constants(ir%n_operands))
+        do i = 1, ir%n_nodes
+            first = ir%nodes(i)%first_operand
+            n = ir%nodes(i)%n_operands
+            select case (ir%nodes(i)%operation)
+            case (IR_ADD)
+                do k = 2, n
+                    operand = ir%operands(first + k - 1)
+                    j = k - 1
+                    do while (j >= 1)
+                        if (ready_of(operand) >= ready_of(ir%operands(first + j - 1))) exit
+                        ir%operands(first + j) = ir%operands(first + j - 1)
+                        j = j - 1
+                    end do
+                    ir%operands(first + j) = operand
+                end do
+                ready(i) = chain_ready(first, n)
+            case (IR_MUL)
+                factors = ir%operands(first:first + n - 1)
+                kept = 0
+                do k = 1, n
+                    if (ir%nodes(factors(k))%operation == IR_LITERAL) cycle
+                    kept = kept + 1
+                    ir%operands(first + kept - 1) = factors(k)
+                end do
+                literals = 0
+                do k = 1, n
+                    if (ir%nodes(factors(k))%operation /= IR_LITERAL) cycle
+                    value = ir%nodes(factors(k))%value
+                    merged = .false.
+                    do j = 1, literals
+                        factor = constants(j)*value
+                        if (.not. exact_product(constants(j), value, factor)) cycle
+                        constants(j) = factor
+                        merged = .true.
+                        exit
+                    end do
+                    if (merged) cycle
+                    literals = literals + 1
+                    constants(literals) = value
+                    nodes(literals) = factors(k)
+                end do
+                do j = 1, literals
+                    if (constants(j) == 1.0_dp .and. kept + literals > 1) cycle
+                    kept = kept + 1
+                    if (constants(j) /= ir%nodes(nodes(j))%value) &
+                        nodes(j) = folded_literal(constants(j))
+                    ir%operands(first + kept - 1) = nodes(j)
+                end do
+                ir%nodes(i)%n_operands = kept
+                ready(i) = chain_ready(first, ir%nodes(i)%n_operands)
+            case (IR_POW)
+                ! Latencies in multiply units: a reciprocal is a Newton
+                ! sequence, a general power a libm call.
+                cost = 24
+                if (literal_integer(ir, ir%operands(first + 1), exponent)) then
+                    if (exponent == -1) then
+                        cost = 6
+                    else if (abs(exponent) <= 3) then
+                        cost = abs(exponent) - 1
+                        if (exponent < 0) cost = cost + 6
+                    end if
+                end if
+                ready(i) = ready_of(ir%operands(first)) + cost
+            case (IR_FUNCTION)
+                ready(i) = 24 + chain_ready(first, n) - (n - 1)
+            end select
+        end do
+
+    contains
+
+        integer function chain_ready(first, n)
+            integer, intent(in) :: first, n
+            integer :: k
+
+            chain_ready = ready_of(ir%operands(first))
+            do k = 2, n
+                chain_ready = max(chain_ready, ready_of(ir%operands(first + k - 1))) + 1
+            end do
+        end function chain_ready
+
+        logical function exact_product(a, b, product)
+            ! A product with a signed power of two is exact unless it leaves
+            ! the normal range of the emitted precision.
+            real(dp), intent(in) :: a, b, product
+            real(dp) :: low, high
+
+            exact_product = abs(fraction(a)) == 0.5_dp .or. abs(fraction(b)) == 0.5_dp
+            if (.not. exact_product) return
+            low = tiny(1.0_dp)
+            high = huge(1.0_dp)
+            if (precision /= PRECISION_REAL64) then
+                low = real(tiny(1.0_real32), dp)
+                high = real(huge(1.0_real32), dp)
+            end if
+            exact_product = abs(product) >= low .and. abs(product) <= high
+        end function exact_product
+
+        integer function ready_of(index)
+            integer, intent(in) :: index
+
+            ! Literals folded by this pass lie beyond the estimates.
+            ready_of = 0
+            if (index <= size(ready)) ready_of = ready(index)
+        end function ready_of
+
+        integer function folded_literal(value) result(index)
+            real(dp), intent(in) :: value
+
+            if (size(ir%nodes) == ir%n_nodes) then
+                allocate (grown(max(8, 2*ir%n_nodes)))
+                grown(1:ir%n_nodes) = ir%nodes(1:ir%n_nodes)
+                call move_alloc(grown, ir%nodes)
+            end if
+            ir%n_nodes = ir%n_nodes + 1
+            index = ir%n_nodes
+            ir%nodes(index)%operation = IR_LITERAL
+            ir%nodes(index)%value = value
+            ir%nodes(index)%first_operand = 0
+            ir%nodes(index)%n_operands = 0
+        end function folded_literal
+    end subroutine shape_for_cuda
 
     subroutine count_ir_uses(ir, use_counts)
         type(kernel_ir_t), intent(in) :: ir

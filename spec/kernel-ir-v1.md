@@ -78,6 +78,22 @@ differentiation. A FortSym adapter similarly lowers an already-established
 `expr_t` DAG. This keeps the IR a neutral boundary and makes differential
 testing meaningful.
 
+## CUDA evaluation order
+
+nvcc evaluates sums and products left to right and, without fast-math flags,
+neither reassociates them nor folds constants across a product. Under the
+`shape_fma` policy (default on) the CUDA backend therefore orders the terms of
+each sum by the estimated time at which their values are ready, so arguments
+and values that a caller's loop can hoist form the base and each later product
+contracts into the running sum as an FMA, with the latest term, typically one
+waiting for a reciprocal, last. The literal factors of a product move to its
+end and are merged only where the merge is exact (one factor a signed power of
+two, result in the normal range); the other factors keep their IR order so
+that prefixes shared between products remain common subexpressions. The
+Fortran and Python backends keep the IR order. Like any evaluation order, this
+changes the rounding of the affected sums and products, not their mathematical
+value.
+
 ## Small integer powers
 
 The existing `small_power_limit` source policy expands exact literal integer

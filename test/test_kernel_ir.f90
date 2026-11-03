@@ -1,6 +1,6 @@
 program test_kernel_ir
     use fortgen_kernel_ir, only: kernel_ir_t, kernel_ir_allocate, &
-        IR_LITERAL, IR_SYMBOL, IR_ADD, IR_POW, IR_FUNCTION
+        IR_LITERAL, IR_SYMBOL, IR_ADD, IR_MUL, IR_POW, IR_FUNCTION
     use fortgen_kernel_emit, only: kernel_emit_spec_t, emit_fortran_kernel_ir, &
         emit_cuda_device_ir, TARGET_FORTRAN_CPU, TARGET_CUDA
     use fortgen_ir_text, only: write_kernel_ir_file, read_kernel_ir_file
@@ -87,8 +87,62 @@ program test_kernel_ir
 
     call check_long_statements_continue()
     call check_elliptic_special_use()
+    call check_cuda_operand_shape()
 
 contains
+
+    subroutine check_cuda_operand_shape()
+        !! CUDA evaluates left to right without reassociation: the sum must
+        !! start from its earliest term and end with the product waiting for
+        !! the reciprocal, and literal factors must become one trailing
+        !! constant. The Fortran leaf keeps the IR order.
+        type(kernel_ir_t) :: shape
+        type(kernel_emit_spec_t) :: shape_spec
+        type(str_t) :: text
+        character(4), parameter :: names(4) = ["a   ", "b   ", "c   ", "d   "]
+        integer :: k
+
+        call kernel_ir_allocate(shape, 11, 10, 2)
+        do k = 1, 4
+            shape%nodes(k)%operation = IR_SYMBOL
+            shape%nodes(k)%name = str(trim(names(k)))
+        end do
+        shape%nodes(5)%operation = IR_LITERAL
+        shape%nodes(5)%value = -1.0d0
+        shape%nodes(6)%operation = IR_LITERAL
+        shape%nodes(6)%value = 2.0d0
+        shape%nodes(7)%operation = IR_LITERAL
+        shape%nodes(7)%value = -1.0d0
+        shape%nodes(8)%operation = IR_POW
+        shape%nodes(8)%first_operand = 1
+        shape%nodes(8)%n_operands = 2
+        shape%nodes(9)%operation = IR_MUL
+        shape%nodes(9)%first_operand = 3
+        shape%nodes(9)%n_operands = 2
+        shape%nodes(10)%operation = IR_MUL
+        shape%nodes(10)%first_operand = 5
+        shape%nodes(10)%n_operands = 4
+        shape%nodes(11)%operation = IR_ADD
+        shape%nodes(11)%first_operand = 9
+        shape%nodes(11)%n_operands = 2
+        shape%operands = [4, 7, 1, 8, 5, 2, 6, 3, 9, 10]
+        shape%outputs = [11, 10]
+        shape_spec%name = str("shape_leaf")
+        shape_spec%args = [str("a"), str("b"), str("c"), str("d")]
+        shape_spec%outputs = [str("s"), str("p")]
+
+        text = emit_cuda_device_ir(shape, shape_spec, ok, message)
+        call require(ok, message)
+        call require(index(chars(text), "(t10 + (a * t8))") > 0, &
+            "CUDA sum does not end with the late product")
+        call require(index(chars(text), "(b * c * (-2.0000000000000000E+000))") > 0, &
+            "CUDA product literals not folded into one trailing constant")
+
+        text = emit_fortran_kernel_ir(shape, shape_spec, ok, message)
+        call require(ok, message)
+        call require(index(chars(text), "((a * t8) + t10)") > 0, &
+            "Fortran sum order changed")
+    end subroutine check_cuda_operand_shape
 
     subroutine check_elliptic_special_use()
         !! Complete elliptic integrals K(m), E(m) are fortnum_special entry
