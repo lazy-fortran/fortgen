@@ -350,6 +350,7 @@ contains
         case (2); text = "fortran_openacc"
         case (3); text = "fortran_openmp_target+fortran_openacc"
         case (4); text = "cuda"
+        case (5); text = "metal"
         case default; text = "invalid"
         end select
     end function target_text

@@ -9,6 +9,7 @@ module fortgen_kernel_target
     public :: TARGET_DEFAULT, TARGET_FORTRAN_CPU
     public :: TARGET_FORTRAN_OPENMP_TARGET, TARGET_FORTRAN_OPENACC
     public :: TARGET_FORTRAN_OPENMP_TARGET_AND_OPENACC, TARGET_CUDA
+    public :: TARGET_METAL
     public :: target_directives, target_is_valid, target_name, target_from_name
 
     !> Preserve the pre-descriptor API: its legacy logical flags decide the
@@ -24,6 +25,10 @@ module fortgen_kernel_target
     integer, parameter :: TARGET_FORTRAN_OPENMP_TARGET_AND_OPENACC = 3
     !> CUDA device leaf; decoration is emitted by the CUDA backend itself.
     integer, parameter :: TARGET_CUDA = 4
+    !> Metal device leaf in Metal Shading Language; decoration is emitted by
+    !> the Metal backend itself. Metal has no binary64 type, so this target
+    !> carries real32 leaves only.
+    integer, parameter :: TARGET_METAL = 5
 
 contains
 
@@ -34,7 +39,8 @@ contains
         select case (target)
         case (TARGET_DEFAULT, TARGET_FORTRAN_CPU, &
                 TARGET_FORTRAN_OPENMP_TARGET, TARGET_FORTRAN_OPENACC, &
-                TARGET_FORTRAN_OPENMP_TARGET_AND_OPENACC, TARGET_CUDA)
+                TARGET_FORTRAN_OPENMP_TARGET_AND_OPENACC, TARGET_CUDA, &
+                TARGET_METAL)
             valid = .true.
         case default
             valid = .false.
@@ -58,6 +64,8 @@ contains
             name = "fortran_openmp_target+fortran_openacc"
         case (TARGET_CUDA)
             name = "cuda"
+        case (TARGET_METAL)
+            name = "metal"
         case default
             name = "invalid"
         end select
@@ -85,7 +93,7 @@ contains
         case (TARGET_FORTRAN_OPENMP_TARGET_AND_OPENACC)
             emit_openmp = .true.
             emit_openacc = .true.
-        case (TARGET_FORTRAN_CPU, TARGET_CUDA)
+        case (TARGET_FORTRAN_CPU, TARGET_CUDA, TARGET_METAL)
             continue
         end select
     end subroutine target_directives
@@ -100,6 +108,7 @@ contains
         case ("fortran_openmp_target+fortran_openacc")
             target = TARGET_FORTRAN_OPENMP_TARGET_AND_OPENACC
         case ("cuda"); target = TARGET_CUDA
+        case ("metal"); target = TARGET_METAL
         case default; target = -999
         end select
     end function target_from_name

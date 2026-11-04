@@ -46,6 +46,11 @@ source-dir = "test"
 main = "test_python_emitter.f90"
 
 [[test]]
+name = "test_metal_emitter"
+source-dir = "test"
+main = "test_metal_emitter.f90"
+
+[[test]]
 name = "test_precision_storage"
 source-dir = "test"
 main = "test_precision_storage.f90"
