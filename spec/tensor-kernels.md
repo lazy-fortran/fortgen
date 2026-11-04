@@ -123,6 +123,16 @@ optional explicit list `orders(dimension, :)` of derivative multi-indices, and
 Without `orders`, every derivative of total order up to `max_order` is emitted.
 Invalid input returns empty source, `ok=.false.` and a diagnostic.
 
+`coefficient_type` and `compute_type` use the scalar IR's `TYPE_REAL32` and
+`TYPE_REAL64` constants and default to `TYPE_REAL64`. Coefficients may use either
+storage type; computation currently requires `TYPE_REAL64`. Narrow coefficients
+are explicitly widened on load, while coordinates, every jet accumulator and
+all outputs stay binary64. Unsupported combinations return empty source before
+emission. Quantizing coefficient storage is the caller's responsibility and
+changes the polynomial; widening cannot recover the discarded information.
+Coordinate units and derivative scales are unchanged. The default schedule and
+generated source are unchanged.
+
 ```fortran
 source = emit_horner_kernel(spec, ok, message)
 ```
