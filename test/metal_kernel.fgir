@@ -1,0 +1,41 @@
+fortgen.kernel_ir.v1
+kernel metal_reciprocal
+precision real32
+target metal
+arg x
+arg dx
+arg seed
+out value 9
+out refined 13
+out square 14
+out cube 15
+out tangent 18
+out adjoint 19
+out wave 20
+out extent 21
+out root 22
+out scaled 23
+node 1 symbol x
+node 2 symbol dx
+node 3 symbol seed
+node 4 literal -1.00000000000000000e+00
+node 5 literal 2.00000000000000000e+00
+node 6 literal -2.00000000000000000e+00
+node 7 literal 5.00000000000000000e-01
+node 8 constant pi
+node 9 pow 2 1 4
+node 10 mul 2 1 9
+node 11 mul 2 4 10
+node 12 add 2 5 11
+node 13 mul 2 9 12
+node 14 mul 2 9 9
+node 15 mul 2 14 9
+node 16 pow 2 1 6
+node 17 mul 2 4 16
+node 18 mul 2 2 17
+node 19 mul 2 3 17
+node 20 function sin 1 9
+node 21 function Max 3 1 2 3
+node 22 pow 2 1 7
+node 23 mul 2 8 14
+end

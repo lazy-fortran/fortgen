@@ -14,8 +14,12 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 endif()
 option(FORTGEN_BUILD_TESTING "Build FortGen tests" ${FORTGEN_IS_STANDALONE})
 option(FORTGEN_BUILD_CUDA_TESTING "Build the opt-in CUDA device oracle" OFF)
+option(FORTGEN_BUILD_METAL_TESTING "Build the opt-in Metal device oracle" OFF)
 if(FORTGEN_BUILD_CUDA_TESTING AND NOT FORTGEN_BUILD_TESTING)
     message(FATAL_ERROR "FORTGEN_BUILD_CUDA_TESTING requires FORTGEN_BUILD_TESTING")
+endif()
+if(FORTGEN_BUILD_METAL_TESTING AND NOT FORTGEN_BUILD_TESTING)
+    message(FATAL_ERROR "FORTGEN_BUILD_METAL_TESTING requires FORTGEN_BUILD_TESTING")
 endif()
 
 add_subdirectory(runtime)
@@ -123,6 +127,10 @@ if(FORTGEN_BUILD_TESTING)
     target_link_libraries(test_python_emitter PRIVATE fortgen)
     add_test(NAME python_emitter COMMAND test_python_emitter
         ${CMAKE_CURRENT_SOURCE_DIR}/test/python_kernel.fgir)
+    add_executable(test_metal_emitter test/test_metal_emitter.f90)
+    target_link_libraries(test_metal_emitter PRIVATE fortgen)
+    add_test(NAME metal_emitter COMMAND test_metal_emitter
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/metal_kernel.fgir)
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
         add_test(NAME python_kernel
@@ -207,6 +215,103 @@ if(FORTGEN_BUILD_TESTING)
         set_target_properties(test_cuda_reciprocal PROPERTIES
             CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
         add_test(NAME cuda_reciprocal COMMAND test_cuda_reciprocal)
+    endif()
+endif()
+
+# Opt-in Metal device oracle. Missing prerequisites skip the gate; a wrong
+# value, a failed Metal compile or a failed run is a failure.
+if(FORTGEN_BUILD_TESTING AND FORTGEN_BUILD_METAL_TESTING)
+    set(FORTGEN_METAL_COMPILER "")
+    set(FORTGEN_METALLIB_COMPILER "")
+    find_program(FORTGEN_XCRUN_EXECUTABLE NAMES xcrun)
+    if(FORTGEN_XCRUN_EXECUTABLE)
+        execute_process(COMMAND ${FORTGEN_XCRUN_EXECUTABLE} --sdk macosx --find metal
+            RESULT_VARIABLE fortgen_metal_probe
+            OUTPUT_VARIABLE fortgen_metal_path ERROR_QUIET
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(fortgen_metal_probe EQUAL 0 AND EXISTS "${fortgen_metal_path}")
+            set(FORTGEN_METAL_COMPILER "${fortgen_metal_path}")
+        endif()
+        execute_process(COMMAND ${FORTGEN_XCRUN_EXECUTABLE} --sdk macosx --find metallib
+            RESULT_VARIABLE fortgen_metallib_probe
+            OUTPUT_VARIABLE fortgen_metallib_path ERROR_QUIET
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(fortgen_metallib_probe EQUAL 0 AND EXISTS "${fortgen_metallib_path}")
+            set(FORTGEN_METALLIB_COMPILER "${fortgen_metallib_path}")
+        endif()
+    endif()
+    if(NOT FORTGEN_METAL_COMPILER OR NOT FORTGEN_METALLIB_COMPILER)
+        message(STATUS "Metal compiler not found: the Metal device oracle is skipped")
+    else()
+        # CMake does not probe for an Objective-C++ compiler on its own here.
+        if(NOT CMAKE_OBJCXX_COMPILER)
+            set(FORTGEN_OBJCXX_COMPILER "")
+            if(FORTGEN_XCRUN_EXECUTABLE)
+                execute_process(COMMAND ${FORTGEN_XCRUN_EXECUTABLE} --sdk macosx
+                    --find clang++ RESULT_VARIABLE fortgen_objcxx_probe
+                    OUTPUT_VARIABLE fortgen_objcxx_path ERROR_QUIET
+                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+                if(fortgen_objcxx_probe EQUAL 0 AND EXISTS "${fortgen_objcxx_path}")
+                    set(FORTGEN_OBJCXX_COMPILER "${fortgen_objcxx_path}")
+                endif()
+            endif()
+            if(NOT FORTGEN_OBJCXX_COMPILER)
+                find_program(FORTGEN_OBJCXX_COMPILER NAMES clang++)
+            endif()
+            if(FORTGEN_OBJCXX_COMPILER)
+                set(CMAKE_OBJCXX_COMPILER "${FORTGEN_OBJCXX_COMPILER}"
+                    CACHE FILEPATH "Objective-C++ compiler for the Metal oracle")
+            endif()
+        endif()
+        if(NOT CMAKE_OBJCXX_COMPILER)
+            message(STATUS "No Objective-C++ compiler: the Metal device oracle is skipped")
+        else()
+            enable_language(OBJCXX)
+        endif()
+    endif()
+    if(CMAKE_OBJCXX_COMPILER AND FORTGEN_METAL_COMPILER AND FORTGEN_METALLIB_COMPILER)
+        set(FORTGEN_METAL_SAMPLES 17)
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/metal_reciprocal.metal
+            COMMAND $<TARGET_FILE:fortgen-codegen> metal
+                ${CMAKE_CURRENT_SOURCE_DIR}/test/metal_kernel.fgir
+                ${CMAKE_CURRENT_BINARY_DIR}/metal_reciprocal.metal
+            DEPENDS fortgen-codegen test/metal_kernel.fgir
+            VERBATIM)
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/metal_kernel.air
+            # Nonfinite oracle cases require precise math and ordered operations.
+            COMMAND ${FORTGEN_METAL_COMPILER} -fno-fast-math -ffp-contract=off -c
+                ${CMAKE_CURRENT_SOURCE_DIR}/test/device/metal_kernel.metal
+                -I${CMAKE_CURRENT_BINARY_DIR}
+                -DFORTGEN_METAL_SAMPLES=${FORTGEN_METAL_SAMPLES}
+                -o ${CMAKE_CURRENT_BINARY_DIR}/metal_kernel.air
+            DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/metal_reciprocal.metal
+                test/device/metal_kernel.metal
+            VERBATIM)
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/metal_kernel.metallib
+            COMMAND ${FORTGEN_METALLIB_COMPILER}
+                ${CMAKE_CURRENT_BINARY_DIR}/metal_kernel.air
+                -o ${CMAKE_CURRENT_BINARY_DIR}/metal_kernel.metallib
+            DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/metal_kernel.air
+            VERBATIM)
+        add_executable(test_metal_kernel test/device/test_metal_kernel.mm)
+        target_compile_definitions(test_metal_kernel PRIVATE
+            FORTGEN_METAL_SAMPLES=${FORTGEN_METAL_SAMPLES}
+            FORTGEN_METAL_LIBRARY="${CMAKE_CURRENT_BINARY_DIR}/metal_kernel.metallib")
+        target_compile_options(test_metal_kernel PRIVATE -fobjc-arc)
+        set_target_properties(test_metal_kernel PROPERTIES
+            OBJC_STANDARD 17 OBJC_STANDARD_REQUIRED ON)
+        find_library(FORTGEN_METAL_FRAMEWORK NAMES Metal)
+        find_library(FORTGEN_FOUNDATION_FRAMEWORK NAMES Foundation)
+        target_link_libraries(test_metal_kernel PRIVATE
+            ${FORTGEN_METAL_FRAMEWORK} ${FORTGEN_FOUNDATION_FRAMEWORK})
+        add_custom_target(fortgen_metal_kernel_library
+            DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/metal_kernel.metallib)
+        add_dependencies(test_metal_kernel fortgen_metal_kernel_library)
+        add_test(NAME metal_kernel COMMAND test_metal_kernel)
+        set_tests_properties(metal_kernel PROPERTIES SKIP_RETURN_CODE 77)
     endif()
 endif()
 
