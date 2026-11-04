@@ -52,6 +52,31 @@ target_link_libraries(fortgen-codegen PRIVATE fortgen)
 
 if(FORTGEN_BUILD_TESTING)
     enable_testing()
+    add_executable(test_typed_scalar test/test_typed_scalar.f90)
+    target_link_libraries(test_typed_scalar PRIVATE fortgen)
+    add_test(NAME typed_scalar COMMAND test_typed_scalar)
+    enable_language(CXX)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/typed_digit.cuh
+            ${CMAKE_CURRENT_BINARY_DIR}/typed_digit.metal
+        COMMAND $<TARGET_FILE:test_typed_scalar>
+            ${CMAKE_CURRENT_BINARY_DIR}/typed_digit.cuh
+            ${CMAKE_CURRENT_BINARY_DIR}/typed_digit.metal
+        DEPENDS test_typed_scalar VERBATIM)
+    configure_file(test/test_typed_host.cpp.in
+        ${CMAKE_CURRENT_BINARY_DIR}/test_typed_host.cpp COPYONLY)
+    add_executable(test_typed_host ${CMAKE_CURRENT_BINARY_DIR}/test_typed_host.cpp
+        ${CMAKE_CURRENT_BINARY_DIR}/typed_digit.cuh)
+    target_include_directories(test_typed_host PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+    target_compile_features(test_typed_host PRIVATE cxx_std_17)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(test_typed_host PRIVATE
+            -fsanitize=undefined,float-cast-overflow -fno-sanitize-recover=all
+            -fno-fast-math -ffp-contract=off)
+        target_link_options(test_typed_host PRIVATE
+            -fsanitize=undefined,float-cast-overflow)
+    endif()
+    add_test(NAME typed_host COMMAND test_typed_host)
     add_executable(test_kernel_ir test/test_kernel_ir.f90)
     target_link_libraries(test_kernel_ir PRIVATE fortgen)
     add_test(NAME kernel_ir COMMAND test_kernel_ir)
@@ -310,6 +335,35 @@ if(FORTGEN_BUILD_TESTING AND FORTGEN_BUILD_METAL_TESTING)
         add_custom_target(fortgen_metal_kernel_library
             DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/metal_kernel.metallib)
         add_dependencies(test_metal_kernel fortgen_metal_kernel_library)
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/typed_digit.air
+            COMMAND ${FORTGEN_METAL_COMPILER} -fno-fast-math -ffp-contract=off -c
+                ${CMAKE_CURRENT_SOURCE_DIR}/test/device/typed_digit_wrapper.metal
+                -I${CMAKE_CURRENT_BINARY_DIR}
+                -o ${CMAKE_CURRENT_BINARY_DIR}/typed_digit.air
+            DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/typed_digit.metal
+                test/device/typed_digit_wrapper.metal VERBATIM)
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/typed_digit.metallib
+            COMMAND ${FORTGEN_METALLIB_COMPILER}
+                ${CMAKE_CURRENT_BINARY_DIR}/typed_digit.air
+                -o ${CMAKE_CURRENT_BINARY_DIR}/typed_digit.metallib
+            DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/typed_digit.air VERBATIM)
+        add_custom_target(fortgen_typed_metal_library
+            DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/typed_digit.metallib)
+        add_executable(test_typed_metal test/device/test_typed_metal.mm)
+        target_include_directories(test_typed_metal PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+        target_compile_definitions(test_typed_metal PRIVATE
+            FORTGEN_TYPED_METAL_LIBRARY="${CMAKE_CURRENT_BINARY_DIR}/typed_digit.metallib")
+        target_compile_options(test_typed_metal PRIVATE -fobjc-arc -fno-fast-math
+            -ffp-contract=off)
+        set_target_properties(test_typed_metal PROPERTIES
+            OBJCXX_STANDARD 17 OBJCXX_STANDARD_REQUIRED ON)
+        target_link_libraries(test_typed_metal PRIVATE
+            ${FORTGEN_METAL_FRAMEWORK} ${FORTGEN_FOUNDATION_FRAMEWORK})
+        add_dependencies(test_typed_metal fortgen_typed_metal_library)
+        add_test(NAME typed_metal COMMAND test_typed_metal)
+        set_tests_properties(typed_metal PROPERTIES SKIP_RETURN_CODE 77)
         add_test(NAME metal_kernel COMMAND test_metal_kernel)
         set_tests_properties(metal_kernel PROPERTIES SKIP_RETURN_CODE 77)
     endif()

@@ -4,7 +4,8 @@ module fortgen_ir_text
     !! The format is intentionally line-oriented and whitespace-separated so it
     !! is trivial to produce from Python and trivial to parse in Fortran.
     use, intrinsic :: iso_fortran_env, only: real64
-    use fortgen_kernel_ir, only: kernel_ir_t, kernel_ir_allocate, &
+    use fortgen_kernel_ir, only: kernel_ir_is_typed, &
+        kernel_ir_t, kernel_ir_allocate, &
         IR_LITERAL, IR_SYMBOL, IR_CONSTANT, IR_ADD, IR_MUL, IR_POW, IR_FUNCTION
     use fortgen_kernel_emit, only: kernel_emit_spec_t, TARGET_FORTRAN_CPU
     use fortgen_kernel_target, only: target_from_name
@@ -276,6 +277,18 @@ contains
 
         ok = .false.
         message = ""
+        if (kernel_ir_is_typed(ir) .or. allocated(spec%arg_types) .or. &
+            allocated(spec%output_types)) then
+            message = "FortGen IR v1: typed scalar graphs cannot be serialized"
+            return
+        end if
+        do i = 1, ir%n_nodes
+            if (ir%nodes(i)%operation < IR_LITERAL .or. &
+                ir%nodes(i)%operation > IR_FUNCTION) then
+                message = "FortGen IR v1: unsupported operation"
+                return
+            end if
+        end do
         open(newunit=unit, file=path, status="replace", action="write", iostat=ios)
         if (ios /= 0) then
             message = "FortGen IR: cannot open output file"
