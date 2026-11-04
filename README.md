@@ -10,8 +10,8 @@ interfaces may change.
 
 ## Features
 
-- Explicit real32, uint32, uint64 and boolean scalar DAGs for CUDA and Metal
-  digit helpers ([spec/typed-scalar-ir.md](spec/typed-scalar-ir.md)).
+- Explicit real32/real64 and boolean scalar DAGs for Fortran and CUDA,
+  plus unsigned CUDA/Metal digit helpers ([spec/typed-scalar-ir.md](spec/typed-scalar-ir.md)).
 - Scalar kernel IR with a versioned text format
   ([spec/kernel-ir-v1.md](spec/kernel-ir-v1.md)).
 - Emitters for Fortran and CUDA leaf functions, CUDA batch kernels and Python

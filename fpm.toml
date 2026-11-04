@@ -21,6 +21,11 @@ source-dir = "test"
 main = "test_fortgen.f90"
 
 [[test]]
+name = "test_mixed_real"
+source-dir = "test"
+main = "test_mixed_real.f90"
+
+[[test]]
 name = "test_typed_scalar"
 source-dir = "test"
 main = "test_typed_scalar.f90"

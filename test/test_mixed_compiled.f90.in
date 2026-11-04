@@ -1,0 +1,52 @@
+program test_mixed_compiled
+    use, intrinsic :: iso_fortran_env, only: int64, real32, real64
+    implicit none
+    interface
+        pure subroutine mixed_correction(x, y, bulk, residual, corrected, half, &
+                literal, large, valid, rounded_x)
+            import real32, real64
+            real(real64), intent(in) :: x, y
+            real(real32), intent(out) :: bulk
+            real(real64), intent(out) :: residual, corrected, half, literal, large
+            real(real64), intent(out) :: rounded_x
+            logical, intent(out) :: valid
+        end subroutine mixed_correction
+    end interface
+    integer(int64) :: m, n, a, b
+    integer :: cases, improved
+    real(real64) :: x, y, exact, residual, corrected, half, literal, large, rounded_x
+    real(real32) :: bulk
+    logical :: valid
+    cases = 0; improved = 0
+    do m = -8, 8
+        do n = -8, 8
+            a = 16777216_int64 + m
+            b = 16777216_int64 + n
+            x = scale(real(a, real64), -24)
+            y = scale(real(b, real64), -24)
+            exact = scale(real(a*b, real64), -48)
+            call mixed_correction(x, y, bulk, residual, corrected, half, literal, &
+                large, valid, rounded_x)
+            call require(corrected == exact .and. half == exact/2.0_real64)
+            call require(residual == exact - real(bulk, real64))
+            call require(literal == 1099511627777.0_real64 .and. &
+                large == 1.0e100_real64)
+            call require(valid .and. rounded_x == real(real(x, real32), real64))
+            call require(bulk == real(x, real32)*real(y, real32))
+            if (real(bulk, real64) /= exact) improved = improved + 1
+            cases = cases + 1
+        end do
+    end do
+    call mixed_correction(-1.0_real64, 1.0_real64, bulk, residual, corrected, &
+        half, literal, large, valid, rounded_x)
+    call require(.not. valid .and. corrected == 0.0_real64 .and. &
+        half == -0.5_real64)
+    call require(improved > 0)
+    print '(a,i0,a,i0,a)', 'mixed Fortran oracle: ', cases, ' exact corrections; ', &
+        improved, ' differ from widened FP32 bulk'
+contains
+    subroutine require(value)
+        logical, intent(in) :: value
+        if (.not. value) error stop 'mixed precision oracle mismatch'
+    end subroutine require
+end program test_mixed_compiled

@@ -5,7 +5,7 @@ module fortgen_kernel_emit
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use fortgen_kernel_ir, only: kernel_ir_t, kernel_ir_node_t, IR_LITERAL, &
         IR_SYMBOL, IR_CONSTANT, IR_ADD, IR_MUL, IR_POW, IR_FUNCTION, &
-        TYPE_DEFAULT, TYPE_REAL32, TYPE_UINT32, TYPE_UINT64, TYPE_BOOL, &
+        TYPE_DEFAULT, TYPE_REAL32, TYPE_REAL64, TYPE_UINT32, TYPE_UINT64, TYPE_BOOL, &
         IR_SUB, IR_SHL, IR_SHR, IR_BITAND, IR_BITOR, IR_LT, IR_LE, IR_EQ, &
         IR_NE, IR_GE, IR_GT, IR_AND, IR_OR, IR_NOT, IR_SELECT, IR_CAST, &
         IR_MULHI, IR_DIV, kernel_ir_is_typed, kernel_ir_validate_types
@@ -743,7 +743,9 @@ contains
                 call b%append("    !$acc routine seq")
                 call b%newline()
             end if
-            if (spec%precision == PRECISION_REAL32) then
+            if (kernel_ir_is_typed(ir)) then
+                call b%append("    use, intrinsic :: iso_fortran_env, only: real32, real64")
+            else if (spec%precision == PRECISION_REAL32) then
                 call b%append("    use, intrinsic :: iso_fortran_env, only: real32")
             else if (spec%precision == PRECISION_MIXED) then
                 call b%append("    use, intrinsic :: iso_fortran_env, only: real32, real64")
@@ -755,7 +757,13 @@ contains
             call b%append("    implicit none")
             call b%newline()
             if (size(spec%args) > 0) then
-                if (spec%precision == PRECISION_REAL32 .or. &
+                if (allocated(spec%arg_types)) then
+                    do k = 1, size(spec%args)
+                        call append_declaration(b, &
+                            scalar_spelling(spec%arg_types(k), backend)//", intent(in)", &
+                            spec%args(k:k))
+                    end do
+                else if (spec%precision == PRECISION_REAL32 .or. &
                     spec%precision == PRECISION_MIXED) then
                     call append_declaration(b, "real(real32), intent(in)", spec%args)
                 else
@@ -763,7 +771,13 @@ contains
                 end if
             end if
             if (size(spec%outputs) > 0) then
-                if (spec%precision == PRECISION_MIXED) then
+                if (allocated(spec%output_types)) then
+                    do k = 1, size(spec%outputs)
+                        call append_declaration(b, &
+                            scalar_spelling(spec%output_types(k), backend)//", intent(out)", &
+                            spec%outputs(k:k))
+                    end do
+                else if (spec%precision == PRECISION_MIXED) then
                     call append_declaration(b, "real(real64), intent(out)", spec%outputs)
                 else if (spec%precision == PRECISION_REAL32) then
                     call append_declaration(b, "real(real32), intent(out)", spec%outputs)
@@ -1148,8 +1162,22 @@ contains
                     return
                 end if
             end if
+            if (ir%nodes(k)%operation == IR_LITERAL .and. &
+                ir%nodes(k)%scalar_type == TYPE_REAL64) then
+                if (.not. ieee_is_finite(ir%nodes(k)%value)) then
+                    message = "kernel emitter: literal is not finite in real64"
+                    return
+                end if
+            end if
             if (is_compound(ir%nodes(k)%operation)) then
                 temporary = prefix//chars(str(k))
+                if (backend == BACKEND_FORTRAN .and. kernel_ir_is_typed(ir)) then
+                    if (typed_fortran_reserved(temporary)) then
+                        message = "kernel emitter: typed Fortran temporary shadows "// &
+                            "an intrinsic or kind name: "//temporary
+                        return
+                    end if
+                end if
                 if (backend == BACKEND_FORTRAN) then
                     if (.not. valid_fortran_name(temporary)) then
                         message = "kernel emitter: temporary name exceeds Fortran's "// &
@@ -1920,6 +1948,16 @@ contains
         integer :: k
         logical :: first
 
+        if (kernel_ir_is_typed(ir)) then
+            do k = 1, ir%n_nodes
+                if (.not. is_compound(ir%nodes(k)%operation)) cycle
+                call b%append("    "// &
+                    scalar_spelling(ir%nodes(k)%scalar_type, BACKEND_FORTRAN)// &
+                    " :: "//prefix//chars(str(k)))
+                call b%newline()
+            end do
+            return
+        end if
         if (precision == PRECISION_REAL32 .or. precision == PRECISION_MIXED) then
             call b%append("    real(real32) :: ")
         else
@@ -1994,8 +2032,42 @@ contains
             message = ""
             return
         end if
-        message = "kernel emitter: typed graphs require the CUDA or Metal scalar backend"
-        if (backend /= BACKEND_CUDA .and. backend /= BACKEND_METAL) return
+        message = "kernel emitter: typed graphs require a Fortran, CUDA or Metal scalar backend"
+        if (backend /= BACKEND_CUDA .and. backend /= BACKEND_METAL .and. &
+            backend /= BACKEND_FORTRAN) return
+        message = "kernel emitter: Metal has no native real64 scalar type"
+        if (backend == BACKEND_METAL) then
+            if (any(ir%nodes%scalar_type == TYPE_REAL64)) return
+            if (allocated(spec%arg_types)) then
+                if (any(spec%arg_types == TYPE_REAL64)) return
+            end if
+            if (allocated(spec%output_types)) then
+                if (any(spec%output_types == TYPE_REAL64)) return
+            end if
+        end if
+        message = "kernel emitter: typed unsigned Fortran scalars are not supported"
+        if (backend == BACKEND_FORTRAN) then
+            if (any(ir%nodes%scalar_type == TYPE_UINT32) .or. &
+                any(ir%nodes%scalar_type == TYPE_UINT64)) return
+            if (allocated(spec%arg_types)) then
+                if (any(spec%arg_types == TYPE_UINT32) .or. &
+                    any(spec%arg_types == TYPE_UINT64)) return
+            end if
+        end if
+        if (backend == BACKEND_FORTRAN) then
+            message = "kernel emitter: typed Fortran identifier shadows an intrinsic or kind name"
+            if (typed_fortran_reserved(chars(spec%name))) return
+            if (allocated(spec%args)) then
+                do i = 1, size(spec%args)
+                    if (typed_fortran_reserved(chars(spec%args(i)))) return
+                end do
+            end if
+            if (allocated(spec%outputs)) then
+                do i = 1, size(spec%outputs)
+                    if (typed_fortran_reserved(chars(spec%outputs(i)))) return
+                end do
+            end if
+        end if
         message = "kernel emitter: typed graphs require strict emission policy"
         if (spec%policy%fold_exact_constants .or. spec%policy%shape_fma .or. &
             spec%policy%eliminate_constant_divisions .or. &
@@ -2010,7 +2082,7 @@ contains
         if (size(spec%output_types) /= size(ir%outputs)) return
         message = "kernel emitter: invalid argument scalar type"
         if (any(spec%arg_types < TYPE_REAL32) .or. &
-            any(spec%arg_types > TYPE_BOOL)) return
+            any(spec%arg_types > TYPE_REAL64)) return
         message = "kernel emitter: output scalar type does not match root"
         do i = 1, size(ir%outputs)
             if (spec%output_types(i) /= ir%nodes(ir%outputs(i))%scalar_type) return
@@ -2027,10 +2099,28 @@ contains
         message = ""
     end subroutine validate_scalar_spec
 
+    logical function typed_fortran_reserved(name) result(reserved)
+        character(*), intent(in) :: name
+        reserved = same_fortran_name(name, "real") .or. &
+            same_fortran_name(name, "merge") .or. &
+            same_fortran_name(name, "real32") .or. &
+            same_fortran_name(name, "real64")
+    end function typed_fortran_reserved
+
     function scalar_spelling(scalar_type, backend) result(text)
         integer, intent(in) :: scalar_type, backend
         character(:), allocatable :: text
+        if (backend == BACKEND_FORTRAN) then
+            select case (scalar_type)
+            case (TYPE_REAL32); text = "real(real32)"
+            case (TYPE_REAL64); text = "real(real64)"
+            case (TYPE_BOOL); text = "logical"
+            end select
+            return
+        end if
         select case (scalar_type)
+        case (TYPE_REAL64)
+            text = "double"
         case (TYPE_REAL32)
             text = "float"
         case (TYPE_UINT32)
@@ -2052,6 +2142,8 @@ contains
         select case (node%scalar_type)
         case (TYPE_REAL32)
             text = literal_text(node%value, backend, PRECISION_REAL32)
+        case (TYPE_REAL64)
+            text = literal_text(node%value, backend, PRECISION_REAL64)
         case (TYPE_UINT32)
             write(digits, '(z8.8)') node%uint_lo
             text = "0x"//digits(:8)//"u"
@@ -2061,6 +2153,7 @@ contains
         case (TYPE_BOOL)
             text = "false"
             if (node%bool_value) text = "true"
+            if (backend == BACKEND_FORTRAN) text = "."//text//"."
         end select
     end function typed_literal
 
@@ -2081,9 +2174,15 @@ contains
         case (IR_SELECT)
             c = operand_reference(ir, ir%operands(first + 2), prefix, backend, precision)
             text = "("//a//" ? "//b//" : "//c//")"
+            if (backend == BACKEND_FORTRAN) text = "merge("//b//", "//c//", "//a//")"
         case (IR_CAST)
             target_type = scalar_spelling(scalar_type, backend)
             text = "static_cast<"//target_type//">("//a//")"
+            if (backend == BACKEND_FORTRAN) then
+                target_type = "real32"
+                if (scalar_type == TYPE_REAL64) target_type = "real64"
+                text = "real("//a//", "//target_type//")"
+            end if
         case (IR_MULHI)
             if (backend == BACKEND_METAL) then
                 text = "metal::mulhi("//a//", "//b//")"
@@ -2094,6 +2193,7 @@ contains
             end if
         case (IR_NOT)
             text = "(!"//a//")"
+            if (backend == BACKEND_FORTRAN) text = "(.not. "//a//")"
         case (IR_SHL, IR_SHR)
             op = " << "
             if (operation == IR_SHR) op = " >> "
@@ -2113,6 +2213,17 @@ contains
             case (IR_OR); op = " || "
             case (IR_DIV); op = " / "
             end select
+            if (backend == BACKEND_FORTRAN) then
+                select case (operation)
+                case (IR_NE); op = " /= "
+                case (IR_AND); op = " .and. "
+                case (IR_OR); op = " .or. "
+                end select
+                if (ir%nodes(ir%operands(first))%scalar_type == TYPE_BOOL) then
+                    if (operation == IR_EQ) op = " .eqv. "
+                    if (operation == IR_NE) op = " .neqv. "
+                end if
+            end if
             text = "("//a//op//b//")"
         end select
     end function typed_expression
