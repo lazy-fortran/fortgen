@@ -4,7 +4,11 @@ module fortgen_kernel_emit
     use, intrinsic :: iso_fortran_env, only: real32, real64
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use fortgen_kernel_ir, only: kernel_ir_t, kernel_ir_node_t, IR_LITERAL, &
-        IR_SYMBOL, IR_CONSTANT, IR_ADD, IR_MUL, IR_POW, IR_FUNCTION
+        IR_SYMBOL, IR_CONSTANT, IR_ADD, IR_MUL, IR_POW, IR_FUNCTION, &
+        TYPE_DEFAULT, TYPE_REAL32, TYPE_UINT32, TYPE_UINT64, TYPE_BOOL, &
+        IR_SUB, IR_SHL, IR_SHR, IR_BITAND, IR_BITOR, IR_LT, IR_LE, IR_EQ, &
+        IR_NE, IR_GE, IR_GT, IR_AND, IR_OR, IR_NOT, IR_SELECT, IR_CAST, &
+        IR_MULHI, IR_DIV, kernel_ir_is_typed, kernel_ir_validate_types
     use fortgen_string, only: str_t, strbuf_t, str, chars
     use fortgen_functions, only: fortran_function_supported, &
         fortran_function_arity_ok, fortran_function_uses_special, &
@@ -60,6 +64,7 @@ module fortgen_kernel_emit
         type(str_t) :: name
         type(str_t), allocatable :: args(:)
         type(str_t), allocatable :: outputs(:)
+        integer, allocatable :: arg_types(:), output_types(:)
         type(str_t) :: temp_prefix
         integer :: target = TARGET_DEFAULT
         type(kernel_emission_policy_t) :: policy
@@ -164,6 +169,12 @@ contains
         integer :: j
 
         source = str('')
+        if (kernel_ir_is_typed(ir) .or. allocated(spec%arg_types) .or. &
+            allocated(spec%output_types)) then
+            ok = .false.
+            message = "kernel emitter: typed CUDA batches are not supported"
+            return
+        end if
         leaf = emit_cuda_device_ir(ir, spec, ok, message)
         if (.not. ok) return
         name = chars(spec%name)
@@ -434,6 +445,12 @@ contains
         if (.not. allocated(input%nodes) .or. .not. allocated(input%operands) .or. &
             .not. allocated(input%outputs)) then
             message = "kernel emitter: IR storage is not allocated"
+            return
+        end if
+
+        if (kernel_ir_is_typed(input)) then
+            output = input
+            ok = .true.
             return
         end if
 
@@ -790,7 +807,10 @@ contains
                 call b%append(" = ")
                 call b%append(rhs)
             else
-                if (spec%precision == PRECISION_REAL32 .or. &
+                if (ir%nodes(k)%scalar_type /= TYPE_DEFAULT) then
+                    call b%append("    const "// &
+                        scalar_spelling(ir%nodes(k)%scalar_type, backend)//" ")
+                else if (spec%precision == PRECISION_REAL32 .or. &
                     spec%precision == PRECISION_MIXED) then
                     call b%append("    const float ")
                 else
@@ -905,6 +925,11 @@ contains
 
         ok = .false.
         message = ""
+        call kernel_ir_validate_types(ir, ok, message)
+        if (.not. ok) return
+        call validate_scalar_spec(ir, spec, backend, ok, message)
+        if (.not. ok) return
+        ok = .false.
         if (.not. precision_is_valid(spec%precision)) then
             message = "kernel emitter: precision choice is invalid"
             return
@@ -1082,6 +1107,11 @@ contains
                         " function "//chars(ir%nodes(k)%name)
                     return
                 end if
+            case (IR_SUB:IR_DIV)
+                if (.not. kernel_ir_is_typed(ir)) then
+                    message = "kernel emitter: operation requires explicit scalar types"
+                    return
+                end if
             case default
                 message = "kernel emitter: unknown IR operation"
                 return
@@ -1108,9 +1138,10 @@ contains
                     return
                 end if
             end if
-            if ((spec%precision == PRECISION_REAL32 .or. &
-                spec%precision == PRECISION_MIXED) .and. &
-                ir%nodes(k)%operation == IR_LITERAL) then
+            if (ir%nodes(k)%operation == IR_LITERAL .and. &
+                (ir%nodes(k)%scalar_type == TYPE_REAL32 .or. &
+                (ir%nodes(k)%scalar_type == TYPE_DEFAULT .and. &
+                spec%precision /= PRECISION_REAL64))) then
                 single_value = real(ir%nodes(k)%value, real32)
                 if (.not. ieee_is_finite(single_value)) then
                     message = "kernel emitter: literal is not finite in real32"
@@ -1259,7 +1290,11 @@ contains
         message = ""
         select case (ir%nodes(index)%operation)
         case (IR_LITERAL)
-            text = literal_text(ir%nodes(index)%value, backend, precision)
+            if (ir%nodes(index)%scalar_type == TYPE_DEFAULT) then
+                text = literal_text(ir%nodes(index)%value, backend, precision)
+            else
+                text = typed_literal(ir%nodes(index), backend)
+            end if
         case (IR_SYMBOL)
             text = chars(ir%nodes(index)%name)
         case (IR_CONSTANT)
@@ -1288,6 +1323,8 @@ contains
             end do
             call b%append(")")
             text = chars(b%to_str())
+        case (IR_SUB:IR_DIV)
+            text = typed_expression(ir, index, prefix, backend, precision)
         case (IR_POW)
             operand = ir%operands(ir%nodes(index)%first_operand)
             integer_power = literal_integer(ir, &
@@ -1483,7 +1520,11 @@ contains
 
         select case (node%operation)
         case (IR_LITERAL)
-            text = literal_text(node%value, backend, precision)
+            if (node%scalar_type == TYPE_DEFAULT) then
+                text = literal_text(node%value, backend, precision)
+            else
+                text = typed_literal(node, backend)
+            end if
         case (IR_SYMBOL)
             text = chars(node%name)
         case (IR_CONSTANT)
@@ -1740,7 +1781,8 @@ contains
         integer, intent(in) :: operation
 
         is_compound = operation == IR_ADD .or. operation == IR_MUL .or. &
-            operation == IR_POW .or. operation == IR_FUNCTION
+            operation == IR_POW .or. operation == IR_FUNCTION .or. &
+            (operation >= IR_SUB .and. operation <= IR_DIV)
     end function is_compound
 
     integer function count_compounds(ir, skip_nodes)
@@ -1830,12 +1872,25 @@ contains
 
         do k = 1, size(spec%args)
             if (k > 1) call b%append(", ")
-            if (c_family) call b%append(input_type)
+            if (c_family) then
+                if (allocated(spec%arg_types)) then
+                    call b%append("const "//scalar_spelling(spec%arg_types(k), backend)//" ")
+                else
+                    call b%append(input_type)
+                end if
+            end if
             call b%append(chars(spec%args(k)))
         end do
         do k = 1, size(spec%outputs)
             if (size(spec%args) > 0 .or. k > 1) call b%append(", ")
-            if (c_family) call b%append(output_type)
+            if (c_family) then
+                if (allocated(spec%output_types)) then
+                    if (backend == BACKEND_METAL) call b%append("thread ")
+                    call b%append(scalar_spelling(spec%output_types(k), backend)//"* ")
+                else
+                    call b%append(output_type)
+                end if
+            end if
             call b%append(chars(spec%outputs(k)))
         end do
     end subroutine append_arguments
@@ -1922,5 +1977,144 @@ contains
         end if
     end function backend_name
 
+
+    subroutine validate_scalar_spec(ir, spec, backend, ok, message)
+        type(kernel_ir_t), intent(in) :: ir
+        type(kernel_emit_spec_t), intent(in) :: spec
+        integer, intent(in) :: backend
+        logical, intent(out) :: ok
+        character(:), allocatable, intent(out) :: message
+        integer :: i, j
+
+        ok = .false.
+        message = "kernel emitter: scalar types require an explicitly typed graph"
+        if (.not. kernel_ir_is_typed(ir)) then
+            if (allocated(spec%arg_types) .or. allocated(spec%output_types)) return
+            ok = .true.
+            message = ""
+            return
+        end if
+        message = "kernel emitter: typed graphs require the CUDA or Metal scalar backend"
+        if (backend /= BACKEND_CUDA .and. backend /= BACKEND_METAL) return
+        message = "kernel emitter: typed graphs require strict emission policy"
+        if (spec%policy%fold_exact_constants .or. spec%policy%shape_fma .or. &
+            spec%policy%eliminate_constant_divisions .or. &
+            spec%policy%small_power_limit /= 0) return
+        message = "kernel emitter: typed graph requires argument and output types"
+        if (.not. allocated(spec%arg_types) .or. &
+            .not. allocated(spec%output_types)) return
+        if (.not. allocated(spec%args) .or. .not. allocated(spec%outputs)) return
+        message = "kernel emitter: scalar type array size mismatch"
+        if (size(spec%arg_types) /= size(spec%args)) return
+        if (size(spec%output_types) /= size(spec%outputs)) return
+        if (size(spec%output_types) /= size(ir%outputs)) return
+        message = "kernel emitter: invalid argument scalar type"
+        if (any(spec%arg_types < TYPE_REAL32) .or. &
+            any(spec%arg_types > TYPE_BOOL)) return
+        message = "kernel emitter: output scalar type does not match root"
+        do i = 1, size(ir%outputs)
+            if (spec%output_types(i) /= ir%nodes(ir%outputs(i))%scalar_type) return
+        end do
+        message = "kernel emitter: symbol scalar type does not match argument"
+        do i = 1, ir%n_nodes
+            if (ir%nodes(i)%operation /= IR_SYMBOL) cycle
+            do j = 1, size(spec%args)
+                if (chars(ir%nodes(i)%name) /= chars(spec%args(j))) cycle
+                if (ir%nodes(i)%scalar_type /= spec%arg_types(j)) return
+            end do
+        end do
+        ok = .true.
+        message = ""
+    end subroutine validate_scalar_spec
+
+    function scalar_spelling(scalar_type, backend) result(text)
+        integer, intent(in) :: scalar_type, backend
+        character(:), allocatable :: text
+        select case (scalar_type)
+        case (TYPE_REAL32)
+            text = "float"
+        case (TYPE_UINT32)
+            text = "unsigned int"
+        case (TYPE_UINT64)
+            text = "unsigned long long"
+            if (backend == BACKEND_METAL) text = "ulong"
+        case (TYPE_BOOL)
+            text = "bool"
+        end select
+    end function scalar_spelling
+
+    function typed_literal(node, backend) result(text)
+        type(kernel_ir_node_t), intent(in) :: node
+        integer, intent(in) :: backend
+        character(:), allocatable :: text
+        character(16) :: digits
+
+        select case (node%scalar_type)
+        case (TYPE_REAL32)
+            text = literal_text(node%value, backend, PRECISION_REAL32)
+        case (TYPE_UINT32)
+            write(digits, '(z8.8)') node%uint_lo
+            text = "0x"//digits(:8)//"u"
+        case (TYPE_UINT64)
+            write(digits, '(z8.8,z8.8)') node%uint_hi, node%uint_lo
+            text = "0x"//digits//"ull"
+        case (TYPE_BOOL)
+            text = "false"
+            if (node%bool_value) text = "true"
+        end select
+    end function typed_literal
+
+    function typed_expression(ir, index, prefix, backend, precision) result(text)
+        type(kernel_ir_t), intent(in) :: ir
+        integer, intent(in) :: index, backend, precision
+        character(*), intent(in) :: prefix
+        character(:), allocatable :: text, a, b, c, op, target_type
+        integer :: first, operation, scalar_type
+
+        first = ir%nodes(index)%first_operand
+        operation = ir%nodes(index)%operation
+        scalar_type = ir%nodes(index)%scalar_type
+        a = operand_reference(ir, ir%operands(first), prefix, backend, precision)
+        if (ir%nodes(index)%n_operands >= 2) &
+            b = operand_reference(ir, ir%operands(first + 1), prefix, backend, precision)
+        select case (operation)
+        case (IR_SELECT)
+            c = operand_reference(ir, ir%operands(first + 2), prefix, backend, precision)
+            text = "("//a//" ? "//b//" : "//c//")"
+        case (IR_CAST)
+            target_type = scalar_spelling(scalar_type, backend)
+            text = "static_cast<"//target_type//">("//a//")"
+        case (IR_MULHI)
+            if (backend == BACKEND_METAL) then
+                text = "metal::mulhi("//a//", "//b//")"
+            else if (scalar_type == TYPE_UINT32) then
+                text = "__umulhi("//a//", "//b//")"
+            else
+                text = "__umul64hi("//a//", "//b//")"
+            end if
+        case (IR_NOT)
+            text = "(!"//a//")"
+        case (IR_SHL, IR_SHR)
+            op = " << "
+            if (operation == IR_SHR) op = " >> "
+            text = "("//a//op//chars(str(ir%nodes(index)%shift))//")"
+        case default
+            select case (operation)
+            case (IR_SUB); op = " - "
+            case (IR_BITAND); op = " & "
+            case (IR_BITOR); op = " | "
+            case (IR_LT); op = " < "
+            case (IR_LE); op = " <= "
+            case (IR_EQ); op = " == "
+            case (IR_NE); op = " != "
+            case (IR_GE); op = " >= "
+            case (IR_GT); op = " > "
+            case (IR_AND); op = " && "
+            case (IR_OR); op = " || "
+            case (IR_DIV); op = " / "
+            end select
+            text = "("//a//op//b//")"
+        end select
+    end function typed_expression
 
 end module fortgen_kernel_emit

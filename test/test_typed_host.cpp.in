@@ -1,0 +1,83 @@
+#include <cstdint>
+#include <cmath>
+#include <cstdlib>
+#include <iostream>
+#include <limits>
+
+// Only device decorations and intrinsics are supplied by this host harness.
+#define __device__
+#define __forceinline__ inline
+static unsigned long long __umul64hi(unsigned long long a, unsigned long long b) {
+    return static_cast<unsigned long long>((static_cast<unsigned __int128>(a) * b) >> 64);
+}
+static unsigned int __umulhi(unsigned int a, unsigned int b) {
+    return static_cast<unsigned int>((std::uint64_t(a) * b) >> 32);
+}
+#include "typed_digit.cuh"
+#ifndef TYPED_DIGIT_EXEC
+#define TYPED_DIGIT_EXEC typed_digit
+#endif
+
+static void require(bool condition) {
+    if (!condition) { std::cerr << "typed host oracle mismatch\n"; std::exit(1); }
+}
+
+int main() {
+    using U = unsigned long long;
+    using W = unsigned __int128;
+    const U values[] = {0, 1, 2, 0xffffffffULL, 0x100000000ULL,
+        0x20000000000001ULL, 0x8000000000000000ULL, 0xffffffffffffffffULL};
+    const float estimates[] = {std::numeric_limits<float>::quiet_NaN(),
+        -std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity(),
+        -1.0f, -0.0f, 0.0f, 1.0f, 1.9f, 32768.0f, 65535.0f,
+        std::nextafter(65536.0f, 0.0f), 65536.0f, 4294967296.0f,
+        std::numeric_limits<float>::max()};
+    std::size_t count = 0;
+    for (U x : values) for (U y : values) for (float estimate : estimates) {
+        U lo, hi, sum, difference, large, signbit, maximum, shifted, masked, merged;
+        U residual, product;
+        unsigned int digit;
+        bool carry, borrow, valid, cert;
+        TYPED_DIGIT_EXEC(x, y, estimate, &lo, &hi, &sum, &carry, &difference, &borrow,
+            &large, &signbit, &maximum, &shifted, &masked, &merged, &digit,
+            &valid, &residual, &cert, &product);
+        const W full = W(x) * y;
+        const W added = W(x) + y;
+        require(lo == U(full) && hi == U(full >> 64));
+        require(sum == U(added) && carry == bool(added >> 64));
+        require(difference == U(W(x) - y) && borrow == (x < y));
+        require(large == 0x20000000000001ULL && signbit == (U(1) << 63));
+        require(maximum == std::numeric_limits<U>::max());
+        require(shifted == (x >> 32) && masked == (x & (U(1) << 63)));
+        require(merged == (x | (U(1) << 63)));
+        const bool expected_valid = estimate >= 0.0f && estimate < 65536.0f;
+        // The oracle's cast is independently guarded, unlike eager IR temporaries.
+        const unsigned int expected_digit = expected_valid ? unsigned(estimate) : 0u;
+        const W exact_product = W(expected_digit) * y;
+        require(valid == expected_valid && digit == expected_digit);
+        require(product == U(exact_product) && residual == U(W(x) - exact_product));
+        require(cert == (expected_valid && exact_product <= W(x)));
+        ++count;
+    }
+    for (U ax : values) for (U bx : values) {
+        const unsigned int a = unsigned(ax), b = unsigned(bx);
+        unsigned int bit, shifted, difference, sum, product, high, selected, identity;
+        bool lt, eq, ne, gt, le, ge, both, either, inverted;
+        float real_a, quotient;
+        typed_u32(a, b, &bit, &shifted, &difference, &sum, &product, &high,
+            &lt, &eq, &ne, &gt, &le, &ge, &both, &either, &inverted, &real_a,
+            &quotient, &selected, &identity);
+        const std::uint64_t full = std::uint64_t(a) * b;
+        require(bit == 0x80000000u && shifted == unsigned(std::uint64_t(a) << 1));
+        require(difference == unsigned(std::uint64_t(a) - b));
+        require(sum == unsigned(std::uint64_t(a) + b));
+        require(product == unsigned(full) && high == unsigned(full >> 32));
+        require(lt == (a < b) && eq == (a == b) && ne == (a != b));
+        require(gt == (a > b) && le == (a <= b) && ge == (a >= b));
+        require(both == (a < b) && either == (a <= b) && inverted == (a >= b));
+        require(real_a == float(a) && quotient == float(a) / 2.0f);
+        require(selected == (a < b ? a : b) && identity == a);
+        ++count;
+    }
+    std::cout << "typed host oracle: " << count << " mixed helper cases passed\n";
+}
