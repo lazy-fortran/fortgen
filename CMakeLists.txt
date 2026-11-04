@@ -52,6 +52,26 @@ target_link_libraries(fortgen-codegen PRIVATE fortgen)
 
 if(FORTGEN_BUILD_TESTING)
     enable_testing()
+    add_executable(test_mixed_real test/test_mixed_real.f90)
+    target_link_libraries(test_mixed_real PRIVATE fortgen)
+    add_test(NAME mixed_real COMMAND test_mixed_real)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/mixed_correction.cuh
+            ${CMAKE_CURRENT_BINARY_DIR}/mixed_correction.f90
+        COMMAND $<TARGET_FILE:test_mixed_real>
+            ${CMAKE_CURRENT_BINARY_DIR}/mixed_correction.cuh
+            ${CMAKE_CURRENT_BINARY_DIR}/mixed_correction.f90
+        DEPENDS test_mixed_real VERBATIM)
+    configure_file(test/test_mixed_compiled.f90.in
+        ${CMAKE_CURRENT_BINARY_DIR}/test_mixed_compiled.f90 COPYONLY)
+    add_executable(test_mixed_compiled
+        ${CMAKE_CURRENT_BINARY_DIR}/test_mixed_compiled.f90
+        ${CMAKE_CURRENT_BINARY_DIR}/mixed_correction.f90)
+    if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(test_mixed_compiled PRIVATE
+            -fno-fast-math -ffp-contract=off)
+    endif()
+    add_test(NAME mixed_compiled COMMAND test_mixed_compiled)
     add_executable(test_typed_scalar test/test_typed_scalar.f90)
     target_link_libraries(test_typed_scalar PRIVATE fortgen)
     add_test(NAME typed_scalar COMMAND test_typed_scalar)
@@ -77,6 +97,20 @@ if(FORTGEN_BUILD_TESTING)
             -fsanitize=undefined,float-cast-overflow)
     endif()
     add_test(NAME typed_host COMMAND test_typed_host)
+    configure_file(test/test_mixed_host.cpp.in
+        ${CMAKE_CURRENT_BINARY_DIR}/test_mixed_host.cpp COPYONLY)
+    add_executable(test_mixed_host ${CMAKE_CURRENT_BINARY_DIR}/test_mixed_host.cpp
+        ${CMAKE_CURRENT_BINARY_DIR}/mixed_correction.cuh)
+    target_include_directories(test_mixed_host PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+    target_compile_features(test_mixed_host PRIVATE cxx_std_17)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(test_mixed_host PRIVATE
+            -fsanitize=undefined,float-cast-overflow -fno-sanitize-recover=all
+            -fno-fast-math -ffp-contract=off)
+        target_link_options(test_mixed_host PRIVATE
+            -fsanitize=undefined,float-cast-overflow)
+    endif()
+    add_test(NAME mixed_host COMMAND test_mixed_host)
     add_executable(test_kernel_ir test/test_kernel_ir.f90)
     target_link_libraries(test_kernel_ir PRIVATE fortgen)
     add_test(NAME kernel_ir COMMAND test_kernel_ir)

@@ -13,7 +13,7 @@ module fortgen_kernel_ir
     public :: IR_LITERAL, IR_SYMBOL, IR_CONSTANT, IR_ADD, IR_MUL, IR_POW, IR_FUNCTION
     public :: kernel_ir_allocate, kernel_ir_validate_structure
 
-    public :: TYPE_DEFAULT, TYPE_REAL32, TYPE_UINT32, TYPE_UINT64, TYPE_BOOL
+    public :: TYPE_DEFAULT, TYPE_REAL32, TYPE_REAL64, TYPE_UINT32, TYPE_UINT64, TYPE_BOOL
     public :: IR_SUB, IR_SHL, IR_SHR, IR_BITAND, IR_BITOR, IR_LT, IR_LE
     public :: IR_EQ, IR_NE, IR_GE, IR_GT, IR_AND, IR_OR, IR_NOT
     public :: IR_SELECT, IR_CAST, IR_MULHI, IR_DIV
@@ -21,6 +21,7 @@ module fortgen_kernel_ir
 
     integer, parameter :: TYPE_DEFAULT = 0, TYPE_REAL32 = 1
     integer, parameter :: TYPE_UINT32 = 2, TYPE_UINT64 = 3, TYPE_BOOL = 4
+    integer, parameter :: TYPE_REAL64 = 5
     integer, parameter :: IR_SUB = 8, IR_SHL = 9, IR_SHR = 10
     integer, parameter :: IR_BITAND = 11, IR_BITOR = 12
     integer, parameter :: IR_LT = 13, IR_LE = 14, IR_EQ = 15, IR_NE = 16
@@ -157,7 +158,7 @@ contains
             n = ir%nodes(i)%n_operands
             first = ir%nodes(i)%first_operand
             message = "kernel IR: invalid scalar type"
-            if (t < TYPE_REAL32 .or. t > TYPE_BOOL) return
+            if (t < TYPE_REAL32 .or. t > TYPE_REAL64) return
             unsigned = t == TYPE_UINT32 .or. t == TYPE_UINT64
             message = "kernel IR: unexpected unsigned payload"
             if (op /= IR_LITERAL .or. .not. unsigned) then
@@ -177,7 +178,7 @@ contains
                 end if
             case (IR_ADD, IR_MUL, IR_SUB, IR_DIV, IR_BITAND, IR_BITOR, IR_MULHI)
                 if (n /= 2 .or. t == TYPE_BOOL) return
-                if (op == IR_DIV .and. t /= TYPE_REAL32) return
+                if (op == IR_DIV .and. t /= TYPE_REAL32 .and. t /= TYPE_REAL64) return
                 if (op >= IR_BITAND .and. op /= IR_DIV .and. .not. unsigned) return
                 do j = first, first + n - 1
                     if (ir%nodes(ir%operands(j))%scalar_type /= t) return
