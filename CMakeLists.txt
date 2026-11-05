@@ -415,6 +415,13 @@ install(EXPORT fortgenTargets
     FILE fortgenTargets.cmake
     NAMESPACE fortgen::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/fortgen)
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+    cmake/fortgenConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/fortgenConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/fortgen)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/fortgenConfig.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/fortgen)
 
 if(FORTGEN_BUILD_TESTING)
     add_executable(test_precision_storage test/test_precision_storage.f90)
