@@ -79,3 +79,11 @@ main = "test_expr_ir.f90"
 implicit-external = false
 implicit-typing = false
 source-form = "free"
+
+[[extra.fo.inputs]]
+path = "test/python_kernel.fgir"
+role = "test-fixture"
+
+[[extra.fo.inputs]]
+path = "test/metal_kernel.fgir"
+role = "test-fixture"
