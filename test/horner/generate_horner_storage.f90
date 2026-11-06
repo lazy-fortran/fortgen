@@ -1,6 +1,7 @@
 program generate_horner_storage
     use fortgen_horner_emit, only: horner_kernel_spec_t, emit_horner_kernel
     use fortgen_kernel_ir, only: TYPE_REAL32, TYPE_REAL64, TYPE_UINT32
+    use fortgen_derivative_set, only: partials
     use fortgen_kernel_target, only: TARGET_FORTRAN_CPU, TARGET_FORTRAN_OPENACC, &
         TARGET_CUDA
     use fortgen_string, only: str, str_t, chars
@@ -16,10 +17,9 @@ program generate_horner_storage
     call get_command_argument(2, path)
     if (trim(mode) /= 'cuda' .and. trim(mode) /= 'fortran') error stop 'mode'
     spec%name = str('horner_storage64')
-    spec%dimension = 3
+    spec%derivatives = partials(3, 1)
     spec%degree = 5
     spec%nq = 3
-    spec%max_order = 1
     do target = TARGET_FORTRAN_CPU, TARGET_CUDA
         if (target /= TARGET_FORTRAN_CPU .and. &
             target /= TARGET_FORTRAN_OPENACC .and. target /= TARGET_CUDA) cycle

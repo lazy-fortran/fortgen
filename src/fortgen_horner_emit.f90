@@ -16,7 +16,8 @@ module fortgen_horner_emit
     use fortgen_names, only: valid_fortran_name
     use fortgen_kernel_ir, only: TYPE_REAL32, TYPE_REAL64
     use fortgen_kernel_target, only: TARGET_FORTRAN_CPU, TARGET_FORTRAN_OPENACC, &
-        TARGET_CUDA
+        TARGET_CUDA, TARGET_METAL
+    use fortgen_derivative_set, only: derivative_set_t
     implicit none
     private
     public :: horner_kernel_spec_t, emit_horner_kernel, horner_derivative_count
@@ -26,22 +27,20 @@ module fortgen_horner_emit
 
     type :: horner_kernel_spec_t
         type(str_t) :: name
-        !> Number of variables, 1..3.
-        integer :: dimension = 3
+        !> The emitted partials; its dimension (1..3) is the number of
+        !> variables.
+        type(derivative_set_t) :: derivatives
         !> Polynomial degree per direction, 0..9.
         integer :: degree(MAX_DIMENSION) = 0
         !> Quantities sharing the point. Zero makes nq a runtime argument.
         integer :: nq = 0
-        !> Every partial derivative up to this total order is emitted when
-        !> `orders` is not allocated.
-        integer :: max_order = 0
-        !> Optional explicit derivative multi-indices, orders(1:dimension, :).
-        integer, allocatable :: orders(:, :)
-        !> TARGET_FORTRAN_CPU, TARGET_FORTRAN_OPENACC or TARGET_CUDA.
+        !> TARGET_FORTRAN_CPU, TARGET_FORTRAN_OPENACC, TARGET_CUDA or
+        !> TARGET_METAL.
         integer :: target = TARGET_FORTRAN_CPU
         !> Coefficient storage may be narrowed independently of the recurrence.
         integer :: coefficient_type = TYPE_REAL64
-        !> Coordinates, accumulators and outputs currently require binary64.
+        !> Coordinates, accumulators and outputs: binary64, except binary32
+        !> on Metal, which has no binary64 type.
         integer :: compute_type = TYPE_REAL64
     end type
 
@@ -55,7 +54,9 @@ module fortgen_horner_emit
         logical, allocatable :: needed(:, :, :)
         logical, allocatable :: live(:, :, :, :)
         logical, allocatable :: ever(:, :, :, :)
+        !> C-family syntax: CUDA or Metal.
         logical :: cuda = .false.
+        logical :: metal = .false.
         integer :: nq = 0
         integer :: coefficient_type = TYPE_REAL64
     end type
@@ -96,7 +97,10 @@ contains
         source = str('')
         call make_plan(spec, p, ok, message)
         if (.not. ok) return
-        if (p%cuda) then
+        if (p%metal) then
+            call emit_metal(spec, p, b)
+            source = str(b%str())
+        else if (p%cuda) then
             call emit_cuda(spec, p, b)
             source = str(b%str())
         else
@@ -115,55 +119,44 @@ contains
         ok = .false.
         message = 'horner kernel: invalid name, dimension, degree or nq'
         if (.not. valid_fortran_name(chars(spec%name))) return
-        if (spec%dimension < 1 .or. spec%dimension > MAX_DIMENSION) return
+        p%d = spec%derivatives%dimension
+        if (p%d < 1 .or. p%d > MAX_DIMENSION) return
         if (spec%nq < 0) return
-        do j = 1, spec%dimension
+        do j = 1, p%d
             if (spec%degree(j) < 0 .or. spec%degree(j) > MAX_DEGREE) return
         end do
         message = 'horner kernel: invalid target'
         if (spec%target /= TARGET_FORTRAN_CPU .and. &
             spec%target /= TARGET_FORTRAN_OPENACC .and. &
-            spec%target /= TARGET_CUDA) return
+            spec%target /= TARGET_CUDA .and. spec%target /= TARGET_METAL) return
         message = 'horner kernel: unsupported coefficient or compute type'
         if (spec%coefficient_type /= TYPE_REAL32 .and. &
             spec%coefficient_type /= TYPE_REAL64) return
-        if (spec%compute_type /= TYPE_REAL64) return
+        if (spec%target == TARGET_METAL) then
+            if (spec%compute_type /= TYPE_REAL32) return
+            if (spec%coefficient_type /= TYPE_REAL32) return
+        else if (spec%compute_type /= TYPE_REAL64) then
+            return
+        end if
         message = 'horner kernel: invalid derivative orders'
-        p%d = spec%dimension
+        if (.not. spec%derivatives%valid()) return
+        if (any(spec%derivatives%orders > MAX_DEGREE)) return
         p%n = 0
         p%n(1:p%d) = spec%degree(1:p%d)
         p%nq = spec%nq
         p%coefficient_type = spec%coefficient_type
-        p%cuda = spec%target == TARGET_CUDA
-        if (allocated(spec%orders)) then
-            if (size(spec%orders, 1) /= p%d .or. size(spec%orders, 2) < 1) return
-            if (any(spec%orders < 0) .or. any(spec%orders > MAX_DEGREE)) return
-            p%amax = 0
-            p%amax(1:p%d) = maxval(spec%orders, dim=2)
-        else
-            if (spec%max_order < 0 .or. spec%max_order > MAX_DEGREE) return
-            p%amax = 0
-            p%amax(1:p%d) = spec%max_order
-        end if
+        p%metal = spec%target == TARGET_METAL
+        p%cuda = spec%target == TARGET_CUDA .or. p%metal
+        p%amax = 0
+        p%amax(1:p%d) = maxval(spec%derivatives%orders, dim=2)
         allocate (p%wanted(0:p%amax(1), 0:p%amax(2), 0:p%amax(3)))
         allocate (p%needed(0:p%amax(1), 0:p%amax(2), 0:p%amax(3)))
         p%wanted = .false.
-        if (allocated(spec%orders)) then
-            do i = 1, size(spec%orders, 2)
-                a = 0
-                a(1:p%d) = spec%orders(:, i)
-                if (p%wanted(a(1), a(2), a(3))) return
-                p%wanted(a(1), a(2), a(3)) = .true.
-            end do
-        else
-            do a1 = 0, p%amax(1)
-                do a2 = 0, p%amax(2)
-                    do a3 = 0, p%amax(3)
-                        p%wanted(a1, a2, a3) = a1 + a2 + a3 <= spec%max_order
-                    end do
-                end do
-            end do
-        end if
+        do i = 1, spec%derivatives%count()
+            a = 0
+            a(1:p%d) = spec%derivatives%orders(:, i)
+            p%wanted(a(1), a(2), a(3)) = .true.
+        end do
         ! Downward closure: a jet entry feeds every entry above it.
         do a1 = 0, p%amax(1)
             do a2 = 0, p%amax(2)
@@ -252,7 +245,7 @@ contains
             end do
             s = s//')'
         end if
-        if (p%coefficient_type == TYPE_REAL32) then
+        if (p%coefficient_type == TYPE_REAL32 .and. .not. p%metal) then
             if (p%cuda) then
                 s = 'static_cast<double>('//s//')'
             else
@@ -278,7 +271,9 @@ contains
         type(buffer_t), intent(inout) :: b
         character(*), intent(in) :: lhs, first, x
 
-        if (p%cuda) then
+        if (p%metal) then
+            call b%line('        '//lhs//' = metal::fma('//x//', '//lhs//', '//first//');')
+        else if (p%cuda) then
             call b%line('        '//lhs//' = fma('//x//', '//lhs//', '//first//');')
         else
             call b%line('        '//lhs//' = '//first//' + '//x//'*'//lhs)
@@ -374,12 +369,16 @@ contains
                             value = acc_name(p%d, a1, a2, a3)
                             scale = factorial(a1)*factorial(a2)*factorial(a3)
                             if (scale /= 1) then
-                                if (p%cuda) then
+                                if (p%metal) then
+                                    value = num(scale)//'.0f*'//value
+                                else if (p%cuda) then
                                     value = num(scale)//'.0*'//value
                                 else
                                     value = num(scale)//'.0_real64*'//value
                                 end if
                             end if
+                        else if (p%metal) then
+                            value = '0.0f'
                         else if (p%cuda) then
                             value = '0.0'
                         else
@@ -568,6 +567,38 @@ contains
         call put_outputs(p, body)
         call b%line('    for (int iq = 0; iq < '//nq_text(p)//'; ++iq) {')
         call declare_accumulators(p, b, '        double ', ';')
+        call b%put(body%str())
+        call b%line('    }')
+        call b%line('}')
+    end subroutine
+
+    !> A Metal device function in binary32 with thread-address-space outputs,
+    !> the convention of FortGen's Metal scalar leaves.
+    subroutine emit_metal(spec, p, b)
+        type(horner_kernel_spec_t), intent(in) :: spec
+        type(plan_t), intent(inout) :: p
+        type(buffer_t), intent(inout) :: b
+        type(buffer_t) :: body
+        character(:), allocatable :: args
+        integer :: j, m, k(MAX_DIMENSION)
+
+        call b%line('/* Generated by FortGen Horner schedule. Do not edit. */')
+        args = ''
+        if (p%nq == 0) args = 'int nq, '
+        args = args//'device const float* c'
+        do j = 1, p%d
+            args = args//', float '//xname(p, j)
+        end do
+        do m = 0, sum(p%amax)
+            if (order_count(p, m) > 0) args = args//', thread float* '//output_name(m)
+        end do
+        call b%line('inline void '//chars(spec%name)//'('//args//')')
+        call b%line('{')
+        k = 0
+        call sweep(p, body, p%d, k)
+        call put_outputs(p, body)
+        call b%line('    for (int iq = 0; iq < '//nq_text(p)//'; ++iq) {')
+        call declare_accumulators(p, b, '        float ', ';')
         call b%put(body%str())
         call b%line('    }')
         call b%line('}')

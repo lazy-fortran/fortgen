@@ -1,11 +1,15 @@
 program generate_horner_suite
-    ! Usage: generate_horner_suite fortran|cuda KERNELS CASES
-    ! Writes every case kernel to KERNELS and, to CASES, the dispatch and the
-    ! derivative multi-indices in emitted order for the independent oracle.
+    ! Usage: generate_horner_suite fortran|cuda|metal KERNELS CASES
+    ! Writes every case kernel to KERNELS and, to CASES, the derivative
+    ! multi-indices in emitted order for the independent oracle. The case
+    ! dispatch goes to CASES, except for Metal, whose dispatch is device code
+    ! and goes to KERNELS.
     use fortgen_horner_emit, only: horner_kernel_spec_t, emit_horner_kernel, &
         horner_derivative_count
+    use fortgen_derivative_set, only: partials, radial_mixed, multi_indices
+    use fortgen_kernel_ir, only: TYPE_REAL32, TYPE_REAL64
     use fortgen_kernel_target, only: TARGET_FORTRAN_CPU, TARGET_FORTRAN_OPENACC, &
-        TARGET_CUDA
+        TARGET_CUDA, TARGET_METAL
     use fortgen_string, only: str, str_t, chars
     implicit none
     integer, parameter :: NCASE = 16
@@ -29,16 +33,18 @@ program generate_horner_suite
         3, 5, 5, 5, 0, 0, 0], [7, NCASE])
     character(2048) :: mode, kernels_path, cases_path
     integer :: kernels, cases, i
-    logical :: cuda
+    logical :: cuda, metal
 
     call get_command_argument(1, mode)
     call get_command_argument(2, kernels_path)
     call get_command_argument(3, cases_path)
-    cuda = trim(mode) == 'cuda'
+    metal = trim(mode) == 'metal'
+    cuda = trim(mode) == 'cuda' .or. metal
     if (.not. cuda .and. trim(mode) /= 'fortran') error stop 'unknown mode'
     call refusals()
     open (newunit=kernels, file=trim(kernels_path), status='replace', action='write')
     open (newunit=cases, file=trim(cases_path), status='replace', action='write')
+    if (metal) write (kernels, '(a)') '#include <metal_stdlib>'
     if (.not. cuda) then
         write (kernels, '(a)') 'module horner_suite_kernels'
         write (kernels, '(a)') 'implicit none'
@@ -48,7 +54,11 @@ program generate_horner_suite
     do i = 1, NCASE
         call write_case(i)
     end do
-    call write_dispatch(cases)
+    if (metal) then
+        call write_dispatch(kernels)
+    else
+        call write_dispatch(cases)
+    end if
     if (.not. cuda) write (kernels, '(a)') 'end module horner_suite_kernels'
     close (kernels)
     close (cases)
@@ -68,16 +78,18 @@ contains
         type(horner_kernel_spec_t) :: spec
 
         spec%name = str('horner_case_'//num(i))
-        spec%dimension = table(1, i)
         spec%degree = table(2:4, i)
         spec%nq = table(5, i)
-        spec%max_order = table(6, i)
         if (table(7, i) == 1) then
-            allocate (spec%orders(3, 7))
-            spec%orders = reshape([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, &
-                2, 0, 0, 1, 1, 0, 1, 0, 1], [3, 7])
+            spec%derivatives = radial_mixed(table(1, i))
+        else
+            spec%derivatives = partials(table(1, i), table(6, i))
         end if
-        if (cuda) then
+        if (metal) then
+            spec%target = TARGET_METAL
+            spec%coefficient_type = TYPE_REAL32
+            spec%compute_type = TYPE_REAL32
+        else if (cuda) then
             spec%target = TARGET_CUDA
         else if (mod(i, 2) == 0) then
             spec%target = TARGET_FORTRAN_OPENACC
@@ -204,7 +216,16 @@ contains
         integer :: i, m, list(3, 200), n, d, nm, offset
         character(:), allocatable :: call_args, nq
 
-        if (cuda) then
+        if (metal) then
+            ! Leaves write thread-space outputs; the launch copies them out.
+            write (u, '(a)') 'kernel void horner_run_case(constant int& id, '// &
+                'constant int& nq, device const float* c, device const float* x, '// &
+                'device float* result)'
+            write (u, '(a)') '{'
+            write (u, '(a)') '    thread float out[256];'
+            write (u, '(a)') '    for (int k = 0; k < 256; ++k) out[k] = 0.0f;'
+            write (u, '(a)') '    switch (id) {'
+        else if (cuda) then
             write (u, '(a)') '__global__ void horner_run_case(int id, int nq, '// &
                 'const double* c, const double* x, double* out)'
             write (u, '(a)') '{'
@@ -253,7 +274,12 @@ contains
                 write (u, '(a)') 'call horner_case_'//num(i)//'('//call_args//')'
             end if
         end do
-        if (cuda) then
+        if (metal) then
+            write (u, '(a)') '    default: break;'
+            write (u, '(a)') '    }'
+            write (u, '(a)') '    for (int k = 0; k < 256; ++k) result[k] = out[k];'
+            write (u, '(a)') '}'
+        else if (cuda) then
             write (u, '(a)') '    default: break;'
             write (u, '(a)') '    }'
             write (u, '(a)') '}'
@@ -272,7 +298,7 @@ contains
         logical :: ok
 
         bad = spec_of(10)
-        bad%dimension = 4
+        bad%derivatives = partials(4, 2)
         s = emit_horner_kernel(bad, ok, message)
         if (ok .or. len(chars(s)) /= 0) error stop 'dimension 4 accepted'
         bad = spec_of(10)
@@ -292,14 +318,20 @@ contains
         s = emit_horner_kernel(bad, ok, message)
         if (ok .or. len(chars(s)) /= 0) error stop 'invalid name accepted'
         bad = spec_of(10)
-        allocate (bad%orders(3, 2))
-        bad%orders = 0
+        bad%derivatives = multi_indices(reshape([0, 0, 0, 0, 0, 0], [3, 2]))
         s = emit_horner_kernel(bad, ok, message)
         if (ok .or. len(chars(s)) /= 0) error stop 'duplicate order accepted'
         bad = spec_of(10)
-        allocate (bad%orders(2, 1))
-        bad%orders = 0
+        deallocate (bad%derivatives%orders)
+        allocate (bad%derivatives%orders(2, 1))
+        bad%derivatives%orders = 0
         s = emit_horner_kernel(bad, ok, message)
         if (ok .or. len(chars(s)) /= 0) error stop 'order rank mismatch accepted'
+        bad = spec_of(10)
+        bad%target = TARGET_METAL
+        bad%coefficient_type = TYPE_REAL64
+        bad%compute_type = TYPE_REAL64
+        s = emit_horner_kernel(bad, ok, message)
+        if (ok .or. len(chars(s)) /= 0) error stop 'binary64 Metal accepted'
     end subroutine
 end program generate_horner_suite

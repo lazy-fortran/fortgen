@@ -39,6 +39,7 @@ target_sources(fortgen PRIVATE
     src/fortgen_kernel_ir.f90
     src/fortgen_functions.f90
     src/fortgen_tensor_emit.f90
+    src/fortgen_derivative_set.f90
     src/fortgen_horner_emit.f90
     src/fortgen_kernel_emit.f90
     src/fortgen_ir_text.f90

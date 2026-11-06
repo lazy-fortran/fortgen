@@ -46,3 +46,35 @@ if(FORTGEN_BUILD_CUDA_TESTING)
         CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
     add_test(NAME cuda_horner COMMAND test_cuda_horner)
 endif()
+if(FORTGEN_BUILD_METAL_TESTING AND CMAKE_OBJCXX_COMPILER AND FORTGEN_METAL_COMPILER
+        AND FORTGEN_METALLIB_COMPILER)
+    add_custom_command(
+        OUTPUT ${horner_dir}/horner_kernels.metal ${horner_dir}/horner_cases.h
+        COMMAND generate_horner_suite metal ${horner_dir}/horner_kernels.metal
+            ${horner_dir}/horner_cases.h
+        DEPENDS generate_horner_suite VERBATIM)
+    add_custom_command(
+        OUTPUT ${horner_dir}/horner_kernels.air
+        COMMAND ${FORTGEN_METAL_COMPILER} -fno-fast-math -c
+            ${horner_dir}/horner_kernels.metal -o ${horner_dir}/horner_kernels.air
+        DEPENDS ${horner_dir}/horner_kernels.metal VERBATIM)
+    add_custom_command(
+        OUTPUT ${horner_dir}/horner_kernels.metallib
+        COMMAND ${FORTGEN_METALLIB_COMPILER} ${horner_dir}/horner_kernels.air
+            -o ${horner_dir}/horner_kernels.metallib
+        DEPENDS ${horner_dir}/horner_kernels.air VERBATIM)
+    add_custom_target(fortgen_horner_metal_library
+        DEPENDS ${horner_dir}/horner_kernels.metallib ${horner_dir}/horner_cases.h)
+    add_executable(test_metal_horner test/horner/test_horner.mm)
+    target_include_directories(test_metal_horner PRIVATE ${horner_dir})
+    target_compile_definitions(test_metal_horner PRIVATE
+        FORTGEN_HORNER_METAL_LIBRARY="${horner_dir}/horner_kernels.metallib")
+    target_compile_options(test_metal_horner PRIVATE -fobjc-arc)
+    set_target_properties(test_metal_horner PROPERTIES
+        OBJCXX_STANDARD 17 OBJCXX_STANDARD_REQUIRED ON)
+    target_link_libraries(test_metal_horner PRIVATE
+        ${FORTGEN_METAL_FRAMEWORK} ${FORTGEN_FOUNDATION_FRAMEWORK})
+    add_dependencies(test_metal_horner fortgen_horner_metal_library)
+    add_test(NAME metal_horner COMMAND test_metal_horner)
+    set_tests_properties(metal_horner PROPERTIES SKIP_RETURN_CODE 77)
+endif()

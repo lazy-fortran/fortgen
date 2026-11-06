@@ -116,16 +116,22 @@ and peak RSS beside each command, compiler flags and source revision.
 together with requested partial derivatives, for one point and `nq` quantities
 that share it. It needs no scalar leaf.
 
-`horner_kernel_spec_t` holds `name`, `dimension`, `degree(1:3)` (0..9), `nq`
-(a positive compile-time count, or 0 for a runtime argument), `max_order`, an
-optional explicit list `orders(dimension, :)` of derivative multi-indices, and
-`target` (`TARGET_FORTRAN_CPU`, `TARGET_FORTRAN_OPENACC` or `TARGET_CUDA`).
-Without `orders`, every derivative of total order up to `max_order` is emitted.
-Invalid input returns empty source, `ok=.false.` and a diagnostic.
+`horner_kernel_spec_t` holds `name`, `derivatives`, `degree(1:3)` (0..9), `nq`
+(a positive compile-time count, or 0 for a runtime argument) and `target`
+(`TARGET_FORTRAN_CPU`, `TARGET_FORTRAN_OPENACC`, `TARGET_CUDA` or
+`TARGET_METAL`). `derivatives` is a `derivative_set_t` from
+`fortgen_derivative_set`, whose dimension is the number of variables:
+`partials(d, k)` holds every derivative of total order up to `k`,
+`radial_mixed(d)` the value, the gradient and the second derivatives with an
+index along variable 1, and `multi_indices(orders)` an explicit list. A set is
+held in the output order below and can be narrowed with `of_order(m)`,
+`touching(axes)` and `without(alpha)`; FortSym's symbolic jets read the same
+type. Invalid input returns empty source, `ok=.false.` and a diagnostic.
 
 `coefficient_type` and `compute_type` use the scalar IR's `TYPE_REAL32` and
 `TYPE_REAL64` constants and default to `TYPE_REAL64`. Coefficients may use either
-storage type; computation currently requires `TYPE_REAL64`. Narrow coefficients
+storage type; computation requires `TYPE_REAL64`, except on Metal, which has
+no binary64 type and requires `TYPE_REAL32` for both. Narrow coefficients
 are explicitly widened on load, while coordinates, every jet accumulator and
 all outputs stay binary64. Unsupported combinations return empty source before
 emission. Quantizing coefficient storage is the caller's responsibility and
@@ -144,7 +150,10 @@ ordered by descending multi-index (11, 12, 13, 22, 23, 33 for a Hessian). In one
 dimension every output is `(nq)`. The OpenACC leaf adds `!$acc routine seq`.
 The CUDA leaf is an `extern "C" __device__` function with pointer arguments
 in the same order, `c[iq + nq*(k1 + (n1+1)*(k2 + (n2+1)*k3))]`, and output
-`m` at `d<m>y[slot + n_m*iq]`.
+`m` at `d<m>y[slot + n_m*iq]`. The Metal leaf is an `inline` binary32 function
+with the CUDA layout, `device const float*` coefficients and `thread float*`
+outputs, and calls `metal::fma`; the including source provides
+`<metal_stdlib>`.
 
 The schedule is nested Horner with direction 1 innermost. Each direction
 carries the truncated Taylor jet `q_a = (1/a!) d^a p/dx^a`, whose Horner step
