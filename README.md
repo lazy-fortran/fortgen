@@ -74,6 +74,7 @@ reference formulas.
 | `fortgen_precision_emit`, `fortgen_storage` | CPU precision variants and half-precision codecs |
 | `fortgen_tensor_emit` | tensor-product schedules |
 | `fortgen_horner_emit` | tensor-product Horner evaluation with fused derivatives |
+| `fortgen_lagrange_emit` | tensor-product Lagrange interpolation at a point from nodal values, with gradient |
 | `fortgen_derivative_set` | which partial derivatives a kernel emits, shared with FortSym |
 | `fortgen_expr_ir` | exact expression IR |
 

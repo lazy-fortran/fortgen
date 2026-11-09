@@ -41,6 +41,7 @@ target_sources(fortgen PRIVATE
     src/fortgen_tensor_emit.f90
     src/fortgen_derivative_set.f90
     src/fortgen_horner_emit.f90
+    src/fortgen_lagrange_emit.f90
     src/fortgen_kernel_emit.f90
     src/fortgen_ir_text.f90
 )
@@ -461,4 +462,5 @@ endif()
 if(FORTGEN_BUILD_TESTING)
     include(test/tensor/tests.cmake)
     include(test/horner/tests.cmake)
+    include(test/lagrange/tests.cmake)
 endif()
