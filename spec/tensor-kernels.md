@@ -169,3 +169,42 @@ runtime `nq`, CPU and OpenACC spellings, an explicit order list) at 25 random
 points each with a dense monomial sum in extended precision. The error bound is
 64 ulp of the summed term magnitudes. `test_cuda_horner` repeats the comparison
 on the device under `FORTGEN_BUILD_CUDA_TESTING`.
+
+## Lagrange point kernels
+
+`fortgen_lagrange_emit` emits tensor-product Lagrange interpolation at one
+point from nodal values on a uniform stencil, with the optional gradient, for
+`d = 1..3` variables and `nq` quantities that share the point. Horner kernels
+take monomial coefficients; these take the values at the stencil nodes, as
+uniform-mesh field and profile lookups store them.
+
+`lagrange_kernel_spec_t` holds `name`, `dimension` (1..3), `points(1:3)`
+(2..10 nodes per direction), `gradient` (default true), `nq` (a positive
+compile-time count, or 0 for a runtime argument) and `target`
+(`TARGET_FORTRAN_CPU` or `TARGET_FORTRAN_OPENACC`). Invalid input returns empty
+source, `ok=.false.` and a diagnostic.
+
+```fortran
+source = emit_lagrange_kernel(spec, ok, message)
+```
+
+The emitted leaf is the pure subroutine
+`NAME([nq,] f, t1[, t2, t3], h1[, h2, h3], y[, dy])` with `f(nq, n1[, n2, n3])`,
+quantity index fastest. `t_j` is the point in mesh steps from the first
+stencil node, so the nodes sit at `t_j = 0..n_j-1`; `h_j` is the reciprocal
+mesh step and scales only the gradient. `y(nq)` is the value and `dy(d, nq)`
+the gradient with respect to the physical coordinates. The OpenACC leaf adds
+`!$acc routine seq`.
+
+The weights of each direction are straight-line prefix and suffix products of
+`t - k` and their derivatives, with the integer node denominators folded into
+constants, so no division depends on the point. The nodal block is contracted
+one direction at a time, carrying the value and one derivative channel per
+direction; for a cubic stencil in three variables this is about half the cost
+of a hand-written closed-form evaluation that forms all node products.
+
+`test_lagrange` compares 10 kernels (one to three variables, 2 to 10 nodes,
+fixed and runtime `nq`, with and without gradient, CPU and OpenACC spellings)
+at 25 random points inside and slightly outside the stencil with a dense
+product formula in extended precision. The error bound is 64 ulp of the summed
+term magnitudes.
