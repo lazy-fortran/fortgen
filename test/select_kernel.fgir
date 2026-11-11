@@ -1,0 +1,30 @@
+fortgen.kernel_ir.v1
+kernel select_kernel
+precision real64
+target default
+arg x
+arg y
+out f 10
+out g 13
+out h 20
+node 1 symbol x
+node 2 symbol y
+node 3 literal 0.00000000000000000e+00
+node 4 literal 1.00000000000000000e+00
+node 5 function select_ne 4 1 3 1 4
+node 6 function sin 1 1
+node 7 literal -1.00000000000000000e+00
+node 8 pow 2 5 7
+node 9 mul 2 6 8
+node 10 function select_ne 4 1 3 9 4
+node 11 mul 2 1 2
+node 12 add 2 1 2
+node 13 function select_lt 4 1 2 11 12
+node 14 function select_le 4 1 2 1 2
+node 15 function select_eq 4 1 2 4 3
+node 16 literal 2.50000000000000000e-01
+node 17 function Min 3 1 2 16
+node 18 function Max 3 1 2 16
+node 19 mul 2 15 18
+node 20 add 3 14 17 19
+end

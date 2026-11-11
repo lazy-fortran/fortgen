@@ -49,6 +49,44 @@ whitespace. The supported target names are `default`, `fortran_cpu`,
 `fortran_openmp_target+fortran_openacc`, and `cuda`.
 
 The format is versioned. Incompatible semantic changes require a new header.
+A new canonical function name is a compatible addition and keeps the `v1`
+header: the grammar is unchanged, every earlier file keeps its meaning and its
+emitted source, and a reader that predates the name refuses the file with
+`unsupported function` instead of misreading it.
+
+## Selections
+
+A `function` node named `select_lt`, `select_le`, `select_eq` or `select_ne`
+takes four operands `l r a b` and has the value of `a` where `l < r`,
+`l <= r`, `l == r` or `l /= r` holds, and of `b` elsewhere. `l > r` is
+`select_lt` with `l` and `r` exchanged. Conjunctions and disjunctions nest:
+`select(c1, select(c2, a, b), b)` and `select(c1, a, select(c2, a, b))`.
+
+| Backend | `select_lt l r a b` |
+|---|---|
+| Fortran | `merge(a, b, l < r)` |
+| CUDA | `((l < r) ? a : b)` |
+| Python | `numpy.where(l < r, a, b)` |
+| Metal | refused; not verified on a device |
+
+The comparison is the IEEE comparison of the working precision: with a NaN
+operand `select_ne` yields `a` and the other three yield `b`, and `-0` equals
+`+0`. A selection chooses a value, not a region. Both `a` and `b` are earlier
+nodes and are always evaluated, so `select_ne(x, 0, sin(x)/x, 1)` still
+divides by zero and relies on the quotient being discarded. Where that is not
+acceptable, for instance under trapping floating-point exceptions, select the
+operand first: `d = select_ne(x, 0, x, 1)`, then `select_ne(x, 0, sin(x)/d, 1)`.
+The Fortran emitter refuses a procedure, argument or output named `merge`
+beside a selection.
+
+## Extrema
+
+`Min` and `Max` (also `min`, `max`) take two or more operands. Fortran emits
+the n-ary intrinsic; CUDA nests `fmin`/`fmax` (`fminf`/`fmaxf` in real32),
+NumPy `minimum`/`maximum` and Metal `metal::min`/`metal::max` from left to
+right. The backends agree for operands that are not NaN; the result for a NaN
+operand and the sign of a zero chosen between `-0` and `+0` are not part of
+the contract.
 
 Constants are `pi` and `e`. The Python backend also accepts the imaginary unit
 `i`, emitted as `1j`; the Fortran and CUDA backends refuse it, since their

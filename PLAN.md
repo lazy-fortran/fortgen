@@ -51,7 +51,7 @@
   checks. Host compilation alone does not establish OpenMP/OpenACC offload.
 - Opt-in [CUDA device gate](test/device/README.md): 3 CTest tests passed with
   CUDA 13.4, GCC 14 and an RTX 5060 Ti, including 17 finite device samples.
-  CUDA Max/Min remain explicit refusals.
+  CUDA emits Min/Max as nested `fmin`/`fmax`.
 - Issues [#1](https://github.com/lazy-fortran/fortgen/issues/1),
   [#4](https://github.com/lazy-fortran/fortgen/issues/4) and
   [#5](https://github.com/lazy-fortran/fortgen/issues/5) are closed with recorded

@@ -15,7 +15,7 @@ interfaces may change.
 - Scalar kernel IR with a versioned text format
   ([spec/kernel-ir-v1.md](spec/kernel-ir-v1.md)).
 - Emitters for Fortran and CUDA leaf functions, CUDA batch kernels and Python
-  functions.
+  functions, including branch-free relational selections and n-ary extrema.
 - CPU precision variants (FP64, FP32, and FP16/BF16 storage) of one kernel.
 - Tensor-product cell schedules around a scalar leaf
   ([spec/tensor-kernels.md](spec/tensor-kernels.md)).

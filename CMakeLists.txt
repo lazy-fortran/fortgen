@@ -192,6 +192,23 @@ if(FORTGEN_BUILD_TESTING)
     target_link_libraries(test_metal_emitter PRIVATE fortgen)
     add_test(NAME metal_emitter COMMAND test_metal_emitter
         ${CMAKE_CURRENT_SOURCE_DIR}/test/metal_kernel.fgir)
+    add_executable(test_select_emitter test/test_select_emitter.f90)
+    target_link_libraries(test_select_emitter PRIVATE fortgen)
+    add_test(NAME select_emitter COMMAND test_select_emitter
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/select_kernel.fgir)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/select_kernel.f90
+        COMMAND $<TARGET_FILE:fortgen-codegen> fortran
+            ${CMAKE_CURRENT_SOURCE_DIR}/test/select_kernel.fgir
+            ${CMAKE_CURRENT_BINARY_DIR}/select_kernel.f90
+        DEPENDS fortgen-codegen test/select_kernel.fgir
+        VERBATIM)
+    configure_file(test/test_select_compiled.f90.in
+        ${CMAKE_CURRENT_BINARY_DIR}/test_select_compiled.f90 COPYONLY)
+    add_executable(test_select_compiled
+        ${CMAKE_CURRENT_BINARY_DIR}/test_select_compiled.f90
+        ${CMAKE_CURRENT_BINARY_DIR}/select_kernel.f90)
+    add_test(NAME select_compiled COMMAND test_select_compiled)
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
         add_test(NAME python_kernel
@@ -200,6 +217,12 @@ if(FORTGEN_BUILD_TESTING)
                 $<TARGET_FILE:fortgen-codegen>
                 ${CMAKE_CURRENT_SOURCE_DIR}/test/python_kernel.fgir)
         set_tests_properties(python_kernel PROPERTIES SKIP_RETURN_CODE 77)
+        add_test(NAME python_select
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test/test_python_select.py
+                $<TARGET_FILE:fortgen-codegen>
+                ${CMAKE_CURRENT_SOURCE_DIR}/test/select_kernel.fgir)
+        set_tests_properties(python_select PROPERTIES SKIP_RETURN_CODE 77)
     endif()
     foreach(precision real64 real32 mixed)
         configure_file(test/device/batch.fgir.in
@@ -228,6 +251,21 @@ if(FORTGEN_BUILD_TESTING)
         set_target_properties(test_cuda_kernel PROPERTIES
             CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
         add_test(NAME cuda_kernel COMMAND test_cuda_kernel)
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/select_kernel.cuh
+            COMMAND $<TARGET_FILE:fortgen-codegen> cuda
+                ${CMAKE_CURRENT_SOURCE_DIR}/test/select_kernel.fgir
+                ${CMAKE_CURRENT_BINARY_DIR}/select_kernel.cuh
+            DEPENDS fortgen-codegen test/select_kernel.fgir
+            VERBATIM)
+        add_executable(test_cuda_select
+            test/device/test_cuda_select.cu
+            ${CMAKE_CURRENT_BINARY_DIR}/select_kernel.cuh)
+        target_include_directories(test_cuda_select PRIVATE
+            ${CMAKE_CURRENT_BINARY_DIR})
+        set_target_properties(test_cuda_select PROPERTIES
+            CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+        add_test(NAME cuda_select COMMAND test_cuda_select)
         foreach(precision real64 real32 mixed)
             configure_file(test/device/batch.fgir.in
                 ${CMAKE_CURRENT_BINARY_DIR}/batch_${precision}.fgir @ONLY)

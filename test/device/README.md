@@ -6,7 +6,10 @@
 - The default native build needs neither CUDA nor a device. Enabling this gate
   requires the CUDA compiler and a usable device; resource failures are failures.
 - The CUDA emitter's supported function set remains explicit. This fixture
-  uses sine, products and powers; it does not establish Min/Max support.
+  uses sine, products and powers.
+- `cuda_select` runs the selections and n-ary Min/Max of
+  `test/select_kernel.fgir` on the device against branching long-double
+  formulas, including the removable point x = 0 and the tie x = y.
 - No fast-math flags are used. This is a correctness fixture, not a benchmark.
 
 Replay the verified RTX 5060 Ti profile (CUDA 13.4, GNU C++ 14):
@@ -17,8 +20,8 @@ cmake -S . -B build-cuda -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_CUDA_COMPILER=/opt/cuda/bin/nvcc \
   -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-14 \
   -DCMAKE_CUDA_ARCHITECTURES=120
-cmake --build build-cuda --target test_cuda_kernel -j 4
-ctest --test-dir build-cuda -R '^cuda_kernel$' --output-on-failure
+cmake --build build-cuda --target test_cuda_kernel test_cuda_select -j 4
+ctest --test-dir build-cuda -R '^cuda_(kernel|select)$' --output-on-failure
 ```
 
 Choose the architecture and supported host compiler explicitly for another
