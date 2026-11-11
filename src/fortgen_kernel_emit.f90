@@ -12,7 +12,7 @@ module fortgen_kernel_emit
     use fortgen_string, only: str_t, strbuf_t, str, chars
     use fortgen_functions, only: fortran_function_supported, &
         fortran_function_arity_ok, fortran_function_uses_special, &
-        fortran_function_spelling
+        fortran_function_spelling, select_function
     use fortgen_kernel_target, only: TARGET_DEFAULT_VALUE => TARGET_DEFAULT, &
         TARGET_FORTRAN_CPU_VALUE => TARGET_FORTRAN_CPU, &
         TARGET_FORTRAN_OPENMP_TARGET_VALUE => TARGET_FORTRAN_OPENMP_TARGET, &
@@ -1121,6 +1121,14 @@ contains
                         " function "//chars(ir%nodes(k)%name)
                     return
                 end if
+                if (backend == BACKEND_FORTRAN .and. &
+                    select_function(chars(ir%nodes(k)%name))) then
+                    if (shadows_merge(spec)) then
+                        message = "kernel emitter: a Fortran selection needs the "// &
+                            "merge intrinsic, which an identifier shadows"
+                        return
+                    end if
+                end if
             case (IR_SUB:IR_DIV)
                 if (.not. kernel_ir_is_typed(ir)) then
                     message = "kernel emitter: operation requires explicit scalar types"
@@ -1205,6 +1213,20 @@ contains
         end do
         ok = .true.
     end subroutine validate
+
+    !> True when the procedure, an argument or an output is named `merge`.
+    logical function shadows_merge(spec) result(shadows)
+        type(kernel_emit_spec_t), intent(in) :: spec
+        integer :: k
+
+        shadows = same_fortran_name(chars(spec%name), "merge")
+        do k = 1, size(spec%args)
+            if (same_fortran_name(chars(spec%args(k)), "merge")) shadows = .true.
+        end do
+        do k = 1, size(spec%outputs)
+            if (same_fortran_name(chars(spec%outputs(k)), "merge")) shadows = .true.
+        end do
+    end function shadows_merge
 
     logical function metal_reserved(name) result(reserved)
         character(*), intent(in) :: name
@@ -1413,6 +1435,11 @@ contains
             call b%append(")")
             text = chars(b%to_str())
         case (IR_FUNCTION)
+            if (select_function(chars(ir%nodes(index)%name))) then
+                text = select_text(ir, index, prefix, backend, precision)
+                ok = .true.
+                return
+            end if
             name = function_name(chars(ir%nodes(index)%name), backend, precision)
             if (backend == BACKEND_PYTHON .and. ir%nodes(index)%n_operands > 2) then
                 ! numpy.maximum/minimum are binary: nest them left to right.
@@ -1426,9 +1453,10 @@ contains
                 ok = .true.
                 return
             end if
-            if (backend == BACKEND_METAL .and. ir%nodes(index)%n_operands > 2) then
-                ! metal::min and metal::max take exactly two arguments; nesting
-                ! selects the same element, so the value is unchanged.
+            if ((backend == BACKEND_METAL .or. backend == BACKEND_CUDA) .and. &
+                ir%nodes(index)%n_operands > 2) then
+                ! metal::min/max and C fmin/fmax take exactly two arguments;
+                ! nesting selects the same element, so the value is unchanged.
                 operand = ir%operands(ir%nodes(index)%first_operand)
                 text = operand_reference(ir, operand, prefix, backend, precision)
                 do k = 2, ir%nodes(index)%n_operands
@@ -1461,6 +1489,42 @@ contains
         end select
         ok = .true.
     end function render_node
+
+    !> `a` where `l <relation> r` holds, otherwise `b`. Both values are
+    !> earlier nodes and already evaluated: this selects a value, not a region.
+    function select_text(ir, index, prefix, backend, precision) result(text)
+        type(kernel_ir_t), intent(in) :: ir
+        integer, intent(in) :: index, backend
+        character(*), intent(in) :: prefix
+        integer, intent(in) :: precision
+        character(:), allocatable :: text
+        character(:), allocatable :: relation, condition, chosen, other
+        integer :: first
+
+        first = ir%nodes(index)%first_operand
+        select case (chars(ir%nodes(index)%name))
+        case ("select_lt"); relation = " < "
+        case ("select_le"); relation = " <= "
+        case ("select_eq"); relation = " == "
+        case default
+            relation = " != "
+            if (backend == BACKEND_FORTRAN) relation = " /= "
+        end select
+        condition = operand_reference(ir, ir%operands(first), prefix, backend, &
+            precision)//relation//operand_reference(ir, ir%operands(first + 1), &
+            prefix, backend, precision)
+        chosen = operand_reference(ir, ir%operands(first + 2), prefix, backend, &
+            precision)
+        other = operand_reference(ir, ir%operands(first + 3), prefix, backend, &
+            precision)
+        if (backend == BACKEND_FORTRAN) then
+            text = "merge("//chosen//", "//other//", "//condition//")"
+        else if (backend == BACKEND_PYTHON) then
+            text = "numpy.where("//condition//", "//chosen//", "//other//")"
+        else
+            text = "(("//condition//") ? "//chosen//" : "//other//")"
+        end if
+    end function select_text
 
     !> General power operation of a C-family backend, used when the exponent
     !> is not an exact literal inside the small-power limit.
@@ -1669,6 +1733,8 @@ contains
         if (backend == BACKEND_CUDA) then
             if (name == "abs") text = "fabs"
             if (name == "gamma") text = "tgamma"
+            if (name == "min" .or. name == "Min") text = "fmin"
+            if (name == "max" .or. name == "Max") text = "fmax"
             if (precision == PRECISION_REAL32 .or. precision == PRECISION_MIXED) then
                 select case (name)
                 case ("sin", "cos", "tan", "asin", "acos", "atan", "sinh", &
@@ -1681,6 +1747,8 @@ contains
                     text = "fabsf"
                 case ("gamma")
                     text = "tgammaf"
+                case ("min", "Min", "max", "Max")
+                    text = text//"f"
                 end select
             end if
         end if
@@ -1714,7 +1782,8 @@ contains
             return
         end if
         if (backend == BACKEND_PYTHON) then
-            supported_function = len(python_function_spelling(name)) > 0
+            supported_function = len(python_function_spelling(name)) > 0 .or. &
+                select_function(name)
             return
         end if
         if (backend == BACKEND_METAL) then
@@ -1734,7 +1803,9 @@ contains
         select case (name)
         case ("sin", "cos", "tan", "asin", "acos", "atan", "atan2", &
                 "sinh", "cosh", "tanh", "asinh", "acosh", "atanh", "exp", &
-                "log", "sqrt", "abs", "erf", "erfc")
+                "log", "sqrt", "abs", "erf", "erfc", "min", "max", "Min", "Max")
+            supported_function = .true.
+        case ("select_lt", "select_le", "select_eq", "select_ne")
             supported_function = .true.
         case ("gamma")
             supported_function = backend == BACKEND_FORTRAN .or. &

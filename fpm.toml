@@ -61,6 +61,11 @@ source-dir = "test"
 main = "test_metal_emitter.f90"
 
 [[test]]
+name = "test_select_emitter"
+source-dir = "test"
+main = "test_select_emitter.f90"
+
+[[test]]
 name = "test_precision_storage"
 source-dir = "test"
 main = "test_precision_storage.f90"
@@ -86,4 +91,8 @@ role = "test-fixture"
 
 [[extra.fo.inputs]]
 path = "test/metal_kernel.fgir"
+role = "test-fixture"
+
+[[extra.fo.inputs]]
+path = "test/select_kernel.fgir"
 role = "test-fixture"

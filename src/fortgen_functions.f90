@@ -5,6 +5,7 @@ module fortgen_functions
 
     public :: fortran_function_supported, fortran_function_arity_ok
     public :: fortran_function_uses_special, fortran_function_spelling
+    public :: select_function
 
 contains
 
@@ -19,9 +20,17 @@ contains
                 "elliptic_k", "elliptic_e")
             ok = .true.
         case default
-            ok = .false.
+            ok = select_function(name)
         end select
     end function fortran_function_supported
+
+    !> Relational selections `select_<relation>(l, r, a, b)`: `a` where
+    !> `l <relation> r` holds, otherwise `b`.
+    pure logical function select_function(name) result(ok)
+        character(*), intent(in) :: name
+        ok = name == "select_lt" .or. name == "select_le" .or. &
+            name == "select_eq" .or. name == "select_ne"
+    end function select_function
 
     pure logical function fortran_function_arity_ok(name, n) result(ok)
         character(*), intent(in) :: name
@@ -32,6 +41,8 @@ contains
         else if (name == "atan2" .or. name == "besselj" .or. &
                 name == "bessely" .or. name == "besseli" .or. name == "besselk") then
             ok = n == 2
+        else if (select_function(name)) then
+            ok = n == 4
         else
             ok = n == 1
         end if

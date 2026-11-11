@@ -1,0 +1,70 @@
+program test_select_compiled
+    !! Emitted selections and n-ary extrema against branching real128
+    !! formulas. The samples include the removable point x = 0 and the tie
+    !! x = y = 1/2, where x*y and x + y differ, so that exchanging < and <=
+    !! or the operand order changes g or h.
+    use, intrinsic :: iso_fortran_env, only: real64, real128
+    implicit none
+    integer :: i
+    logical :: saw_zero, saw_tie
+    real(real64) :: x, y, f, g, h
+    real(real128) :: xr, yr, reference_f, reference_g, reference_h, tolerance
+    interface
+        subroutine select_kernel(x, y, f, g, h)
+            import real64
+            real(real64), intent(in) :: x, y
+            real(real64), intent(out) :: f, g, h
+        end subroutine select_kernel
+    end interface
+
+    saw_zero = .false.
+    saw_tie = .false.
+    tolerance = 32.0_real128*real(epsilon(x), real128)
+    do i = -8, 8
+        x = real(i, real64)/4.0_real64
+        y = real(6 - i, real64)/8.0_real64
+        call select_kernel(x, y, f, g, h)
+        xr = real(x, real128)
+        yr = real(y, real128)
+        if (xr /= 0.0_real128) then
+            reference_f = sin(xr)/xr
+        else
+            reference_f = 1.0_real128
+            saw_zero = .true.
+        end if
+        if (xr < yr) then
+            reference_g = xr*yr
+        else
+            reference_g = xr + yr
+        end if
+        if (xr <= yr) then
+            reference_h = xr*yr
+        else
+            reference_h = xr + yr
+        end if
+        reference_h = reference_h + min(xr, yr, 0.25_real128)
+        if (xr == yr) then
+            reference_h = reference_h + max(xr, yr, 0.25_real128)
+            saw_tie = .true.
+        end if
+        call compare("f", f, reference_f)
+        call compare("g", g, reference_g)
+        call compare("h", h, reference_h)
+    end do
+    if (.not. (saw_zero .and. saw_tie)) error stop "samples miss the guarded points"
+    print *, "select kernel: 17 independent real128 samples passed"
+
+contains
+
+    subroutine compare(label, value, reference)
+        character(*), intent(in) :: label
+        real(real64), intent(in) :: value
+        real(real128), intent(in) :: reference
+
+        ! NaN fails this comparison too.
+        if (abs(real(value, real128) - reference) <= &
+            tolerance*max(1.0_real128, abs(reference))) return
+        print *, label, " mismatch at sample ", i, value, reference
+        error stop 1
+    end subroutine compare
+end program test_select_compiled
