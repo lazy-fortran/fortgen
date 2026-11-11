@@ -16,7 +16,7 @@ except ModuleNotFoundError:
 def reference(x, y):
     f = math.sin(x)/x if x != 0.0 else 1.0
     g = x*y if x < y else x + y
-    h = (x if x <= y else y) + min(x, y, 0.25)
+    h = (x*y if x <= y else x + y) + min(x, y, 0.25)
     if x == y:
         h += max(x, y, 0.25)
     return f, g, h

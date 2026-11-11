@@ -9,7 +9,8 @@
   uses sine, products and powers.
 - `cuda_select` runs the selections and n-ary Min/Max of
   `test/select_kernel.fgir` on the device against branching long-double
-  formulas, including the removable point x = 0 and the tie x = y.
+  formulas, including the removable point x = 0 and the tie x = y = 1/2,
+  where `<` and `<=` select different values.
 - No fast-math flags are used. This is a correctness fixture, not a benchmark.
 
 Replay the verified RTX 5060 Ti profile (CUDA 13.4, GNU C++ 14):

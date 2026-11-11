@@ -1,7 +1,8 @@
 program test_select_compiled
     !! Emitted selections and n-ary extrema against branching real128
     !! formulas. The samples include the removable point x = 0 and the tie
-    !! x = y, where a wrong relation or operand order changes the value.
+    !! x = y = 1/2, where x*y and x + y differ, so that exchanging < and <=
+    !! or the operand order changes g or h.
     use, intrinsic :: iso_fortran_env, only: real64, real128
     implicit none
     integer :: i
@@ -37,9 +38,9 @@ program test_select_compiled
             reference_g = xr + yr
         end if
         if (xr <= yr) then
-            reference_h = xr
+            reference_h = xr*yr
         else
-            reference_h = yr
+            reference_h = xr + yr
         end if
         reference_h = reference_h + min(xr, yr, 0.25_real128)
         if (xr == yr) then

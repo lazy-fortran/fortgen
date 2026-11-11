@@ -38,7 +38,7 @@ int main() {
             saw_zero = true;
         }
         reference[1] = x < y ? x*y : x + y;
-        reference[2] = (x <= y ? x : y) + std::min({x, y, 0.25L});
+        reference[2] = (x <= y ? x*y : x + y) + std::min({x, y, 0.25L});
         if (x == y) {
             reference[2] += std::max({x, y, 0.25L});
             saw_tie = true;

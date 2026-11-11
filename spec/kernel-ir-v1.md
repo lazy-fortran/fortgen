@@ -51,8 +51,9 @@ whitespace. The supported target names are `default`, `fortran_cpu`,
 The format is versioned. Incompatible semantic changes require a new header.
 A new canonical function name is a compatible addition and keeps the `v1`
 header: the grammar is unchanged, every earlier file keeps its meaning and its
-emitted source, and a reader that predates the name refuses the file with
-`unsupported function` instead of misreading it.
+emitted source, and a reader that predates the name refuses the file (with
+`wrong arity for function` or `unsupported function`) instead of misreading
+it.
 
 ## Selections
 

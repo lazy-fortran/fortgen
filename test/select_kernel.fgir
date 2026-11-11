@@ -20,7 +20,7 @@ node 10 function select_ne 4 1 3 9 4
 node 11 mul 2 1 2
 node 12 add 2 1 2
 node 13 function select_lt 4 1 2 11 12
-node 14 function select_le 4 1 2 1 2
+node 14 function select_le 4 1 2 11 12
 node 15 function select_eq 4 1 2 4 3
 node 16 literal 2.50000000000000000e-01
 node 17 function Min 3 1 2 16

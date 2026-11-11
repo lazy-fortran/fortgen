@@ -49,7 +49,7 @@
   Optional ordinary-SymPy frontend: 2 passed, including 17 compiled samples.
 - Four serialized Fortran target profiles passed independent host-compiled
   checks. Host compilation alone does not establish OpenMP/OpenACC offload.
-- Opt-in [CUDA device gate](test/device/README.md): 3 CTest tests passed with
+- Opt-in [CUDA device gate](test/device/README.md): 8 CTest tests passed with
   CUDA 13.4, GCC 14 and an RTX 5060 Ti, including 17 finite device samples.
   CUDA emits Min/Max as nested `fmin`/`fmax`.
 - Issues [#1](https://github.com/lazy-fortran/fortgen/issues/1),

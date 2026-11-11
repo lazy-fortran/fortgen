@@ -32,7 +32,7 @@ program test_select_emitter
         "x /= 0.0000000000000000E+000_real64)") > 0, "Fortran select_ne spelling")
     call require(index(chars(source), "merge(t11, t12, x < y)") > 0, &
         "Fortran select_lt spelling")
-    call require(index(chars(source), "merge(x, y, x <= y)") > 0, &
+    call require(index(chars(source), "merge(t11, t12, x <= y)") > 0, &
         "Fortran select_le spelling")
     call require(index(chars(source), "x == y)") > 0, "Fortran select_eq spelling")
 
@@ -51,6 +51,10 @@ program test_select_emitter
     call require(ok, message)
     call require(index(chars(source), "((x < y) ? t11 : t12)") > 0, &
         "CUDA select_lt spelling")
+    call require(index(chars(source), "((x <= y) ? t11 : t12)") > 0, &
+        "CUDA select_le spelling")
+    call require(index(chars(source), "((x == y) ? ") > 0, &
+        "CUDA select_eq spelling")
     call require(index(chars(source), "((x != 0.0000000000000000E+000) ? ") > 0, &
         "CUDA select_ne spelling")
     call require(index(chars(source), "fmin(fmin(x, y), 2.5000000000000000E-001)") > 0, &
@@ -60,6 +64,10 @@ program test_select_emitter
     source = emit_cuda_batch_ir(ir, spec, ok, message)
     call require(ok, message)
     call require(index(chars(source), "select_kernel_batch(") > 0, "CUDA batch")
+    call require(index(chars(source), " < ") > 0 .and. &
+        index(chars(source), " <= ") > 0 .and. &
+        index(chars(source), " == ") > 0 .and. &
+        index(chars(source), " != ") > 0, "CUDA batch relation spellings")
 
     changed = spec
     changed%precision = PRECISION_REAL32
@@ -74,6 +82,12 @@ program test_select_emitter
     call require(ok, message)
     call require(index(chars(source), "numpy.where(x < y, t11, t12)") > 0, &
         "Python select_lt spelling")
+    call require(index(chars(source), "numpy.where(x <= y, t11, t12)") > 0, &
+        "Python select_le spelling")
+    call require(index(chars(source), "numpy.where(x == y, ") > 0, &
+        "Python select_eq spelling")
+    call require(index(chars(source), "numpy.where(x != 0.0") > 0, &
+        "Python select_ne spelling")
 
     source = emit_metal_device_ir(ir, changed, ok, message)
     call require(.not. ok .and. index(message, "unsupported Metal function select_ne") > 0, &
