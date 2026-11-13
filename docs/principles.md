@@ -49,8 +49,9 @@
 
 ## Incremental scope
 
-- Text utilities and scalar Kernel IR/backend are implemented. Exact Expr IR
-  and broader computation work remain in [PLAN.md](../PLAN.md).
+- Text utilities, the scalar Kernel IR/backend and the bounded exact Expr IR
+  are implemented. The [issue tracker](https://github.com/lazy-fortran/fortgen/issues)
+  records unfinished extensions.
 - Statements/control flow need an actual consumer and independent execution
   oracle. A statement extension does not introduce a scheduling language.
 - Canonical serialization supports reproducibility and structural comparisons;

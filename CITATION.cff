@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "Please cite the archived release used in your work."
+type: software
+title: "FortGen: numerical kernel code generation"
+authors:
+  - family-names: Albert
+    given-names: Christopher
+repository-code: "https://github.com/lazy-fortran/fortgen"
+url: "https://github.com/lazy-fortran/fortgen"
+license: MIT

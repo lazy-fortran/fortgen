@@ -1,8 +1,9 @@
 # fortgen
 
 fortgen is a small Fortran library and command-line tool for generating
-numerical source code. It defines a scalar kernel IR (a topologically ordered
-computation DAG) and emits it as Fortran, CUDA or Python, together with the
+numerical source code. It defines a scalar kernel intermediate representation
+(IR), a topologically ordered directed acyclic graph, and emits it as Fortran,
+CUDA or Python, together with the
 text utilities that code generators in the lazy-fortran projects share.
 
 Status: under development; the kernel IR v1 format is versioned, other
@@ -31,6 +32,9 @@ interfaces may change.
 
 ## Build
 
+The native tests need a compiler with `real128` support, such as GFortran.
+Library-only CMake builds can disable tests with `FORTGEN_BUILD_TESTING=OFF`.
+
 With fpm:
 
 ```sh
@@ -43,7 +47,8 @@ With CMake, which also regenerates the test fixtures and checks them against
 the checked-in copies:
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_Fortran_COMPILER=gfortran
 cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
@@ -84,12 +89,19 @@ reference formulas.
 - [docs/precision.md](docs/precision.md): CPU precision families
 - [docs/principles.md](docs/principles.md): layer ownership and measurement conventions
 - [docs/migration.md](docs/migration.md): how FortSym and FortAD use fortgen
-- [PLAN.md](PLAN.md): planned work
+- [Status and verification](docs/status.md)
+- [User guide](docs/README.md)
+- [Open development work](https://github.com/lazy-fortran/fortgen/issues)
 
 ## Related projects
 
 - [fortsym](https://github.com/lazy-fortran/fortsym): symbolic frontend that
   lowers expressions to the kernel IR
+
+## Contributing and citation
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for checks and
+[CITATION.cff](CITATION.cff) for citation metadata.
 
 ## Licence
 
