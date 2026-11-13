@@ -1,5 +1,4 @@
 # Compile the emitted products, then compare with an independent dense oracle.
-find_package(OpenMP REQUIRED COMPONENTS Fortran)
 add_executable(generate_tensor test/tensor/generate_tensor.f90)
 target_link_libraries(generate_tensor PRIVATE fortgen)
 foreach(bits 32 64)

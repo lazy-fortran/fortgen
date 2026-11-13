@@ -54,6 +54,7 @@ target_link_libraries(fortgen-codegen PRIVATE fortgen)
 
 if(FORTGEN_BUILD_TESTING)
     enable_testing()
+    find_package(OpenMP REQUIRED COMPONENTS Fortran)
     add_executable(test_mixed_real test/test_mixed_real.f90)
     target_link_libraries(test_mixed_real PRIVATE fortgen)
     add_test(NAME mixed_real COMMAND test_mixed_real)
@@ -128,6 +129,7 @@ if(FORTGEN_BUILD_TESTING)
     add_executable(test_compiled_kernel
         ${CMAKE_CURRENT_BINARY_DIR}/test_compiled_kernel.f90
         ${CMAKE_CURRENT_BINARY_DIR}/behavior_kernel.f90)
+    target_link_libraries(test_compiled_kernel PRIVATE OpenMP::OpenMP_Fortran)
     add_test(NAME compiled_kernel COMMAND test_compiled_kernel)
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/reciprocal_kernel.f90

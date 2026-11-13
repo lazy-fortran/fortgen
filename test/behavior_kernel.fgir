@@ -1,7 +1,7 @@
 fortgen.kernel_ir.v1
 kernel behavior_kernel
 precision real64
-target fortran_cpu
+target fortran_openmp_target+fortran_openacc
 arg x
 arg y
 out f 11

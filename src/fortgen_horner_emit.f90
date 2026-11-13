@@ -493,7 +493,6 @@ contains
             if (order_count(p, m) > 0) args = args//', '//output_name(m)
         end do
         call b%line('pure subroutine '//chars(spec%name)//'('//args//')')
-        if (spec%target == TARGET_FORTRAN_OPENACC) call b%line('    !$acc routine seq')
         if (p%coefficient_type == TYPE_REAL32) then
             call b%line('    use, intrinsic :: iso_fortran_env, only: real32, real64')
         else
@@ -529,6 +528,7 @@ contains
         call put_outputs(p, body)
         call declare_accumulators(p, b, '    real(real64) :: ', '')
         call b%line('    integer :: iq')
+        if (spec%target == TARGET_FORTRAN_OPENACC) call b%line('    !$acc routine seq')
         call b%line('')
         call b%line('    do iq = 1, '//nq_text(p))
         call b%put(body%str())

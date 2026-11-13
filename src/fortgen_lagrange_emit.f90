@@ -107,7 +107,6 @@ contains
         end do
 
         call b%line('pure subroutine '//chars(spec%name)//'('//args//')')
-        if (spec%target == TARGET_FORTRAN_OPENACC) call b%line('!$acc routine seq')
         call b%line('use, intrinsic :: iso_fortran_env, only: real64')
         call b%line('implicit none')
         if (spec%nq == 0) call b%line('integer, intent(in) :: nq')
@@ -122,6 +121,7 @@ contains
             call declare_weights(spec, j, b)
         end do
         call declare_contraction(spec, b)
+        if (spec%target == TARGET_FORTRAN_OPENACC) call b%line('!$acc routine seq')
         do j = 1, d
             call emit_weights(spec, j, b)
         end do
