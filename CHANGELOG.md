@@ -1,7 +1,6 @@
 # Changelog
 
-## Unreleased
-
+## 0.2.0 (2026-11-14)
 - Shared scalar and exact-expression intermediate representations.
 - Fortran, CUDA and Python emission, target and precision descriptors,
   tensor-product interpolation and reusable text generation utilities.
