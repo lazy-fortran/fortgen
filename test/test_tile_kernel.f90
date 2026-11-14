@@ -41,7 +41,14 @@ program test_tile_kernel
     call require(ok .and. count_of(src, 'add %rdi, %rsi') == 5 .and. index(src, 'shl $3, %rdi') > 0, &
         'strided A advances by lda per step')
     call require(index(src, 'int64_t lda') > 0, 'strided prototype')
+    s%b_strided = .true.
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(.not. ok, 'A and B cannot both be unpacked')
     s%a_strided = .false.
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(ok .and. index(src, 'push %r12') > 0 .and. index(src, 'pop %r12') > 0 .and. &
+        count_of(src, ',%r12,') == 4*5 + 2, 'strided B: column groups by scaled ldb, callee-saved kept')
+    s%b_strided = .false.
     s%update_c = .false.
 
     s%isa = ISA_X86_64_AVX512
@@ -72,6 +79,10 @@ program test_tile_kernel
     src = emit_tile_kernel_c_asm(s, ok, msg)
     call require(ok .and. count_of(src, 'add x1, x1, x14') == 5, 'NEON strided A')
     s%a_strided = .false.
+    s%b_strided = .true.
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(ok .and. count_of(src, '], #8') == 5*6, 'NEON strided B: one lane load per element')
+    s%b_strided = .false.
     s%update_c = .false.
     s%nr = 5
     src = emit_tile_kernel_c_asm(s, ok, msg)

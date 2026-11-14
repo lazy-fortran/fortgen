@@ -22,6 +22,9 @@ module fortgen_tile_kernel
     ! With a_strided, A is read unpacked from a column-major matrix:
     !     void name(int64_t k, const double *a, int64_t lda, const double *b,
     !               double *c_or_acc, int64_t ldc);
+    ! With b_strided, B is read unpacked from a column-major matrix:
+    !     void name(int64_t k, const double *a, const double *b, int64_t ldb,
+    !               double *c_or_acc, int64_t ldc);
     implicit none
     private
 
@@ -53,6 +56,9 @@ module fortgen_tile_kernel
         !> Read A unpacked from a column-major matrix with leading dimension
         !> lda (one column of the tile per step of k) instead of a packed panel.
         logical :: a_strided = .false.
+        !> Read B unpacked from a column-major matrix with leading dimension
+        !> ldb (one row of the tile's columns per step of k); A stays packed.
+        logical :: b_strided = .false.
     end type tile_kernel_spec_t
 
 contains
@@ -146,6 +152,10 @@ contains
                 message = 'nr must be even on aarch64_neon (B is loaded in pairs)'
             else if (tile_register_count(spec) > isa_vector_registers(spec%isa)) then
                 message = 'tile needs more vector registers than '//isa_name(spec%isa)//' has'
+            else if (spec%a_strided .and. spec%b_strided) then
+                message = 'A and B cannot both be read unpacked'
+            else if (spec%b_strided .and. spec%nr > merge(6, 9, spec%isa == ISA_AARCH64_NEON)) then
+                message = 'unpacked B supports at most 9 columns (6 on aarch64_neon)'
             end if
         end if
     end function tile_kernel_check
@@ -185,6 +195,9 @@ contains
         if (spec%a_strided) then
             call add(source, 'void '//spec%name//'(int64_t k, const double *a, int64_t lda, const double *b, '// &
                 'double *'//merge('c  ', 'acc', spec%update_c)//', int64_t ldc);')
+        else if (spec%b_strided) then
+            call add(source, 'void '//spec%name//'(int64_t k, const double *a, const double *b, int64_t ldb, '// &
+                'double *'//merge('c  ', 'acc', spec%update_c)//', int64_t ldc);')
         else if (spec%update_c) then
             call add(source, 'void '//spec%name//'(int64_t k, const double *a, const double *b, double *c, int64_t ldc);')
         else
@@ -220,6 +233,21 @@ contains
         do v = 0, nacc - 1
             call asm(text, 'vxorpd '//reg(v)//', '//reg(v)//', '//reg(v))
         end do
+        if (spec%b_strided) then
+            ! (k, a, b, ldb, c, ldc) in (rdi, rsi, rdx, rcx, r8, r9): ldb bytes in
+            ! r12; column groups 0-2, 3-5, 6-8 of B from rdx, r13, r14
+            call asm(text, 'push %r12')
+            call asm(text, 'push %r13')
+            call asm(text, 'push %r14')
+            call asm(text, 'mov %rcx, %r12')
+            call asm(text, 'shl $3, %r12')
+            call asm(text, 'lea (%rdx,%r12,2), %r13')
+            call asm(text, 'add %r12, %r13')
+            call asm(text, 'lea (%r13,%r12,2), %r14')
+            call asm(text, 'add %r12, %r14')
+            call asm(text, 'mov %r8, %rcx')
+            call asm(text, 'mov %r9, %r11')
+        end if
         if (spec%a_strided) then
             ! (k, a, lda, b, c, ldc) in (rdi, rsi, rdx, rcx, r8, r9) to the
             ! registers below: lda in bytes in rdi once k is in rax
@@ -232,7 +260,7 @@ contains
         end if
         ! rax = k / k_unroll, r9 = k mod k_unroll; div clobbers rdx (b)
         ! update_c: ldc arrives in r8, which the division below overwrites
-        if (spec%update_c .and. .not. spec%a_strided) call asm(text, 'mov %r8, %r11')
+        if (spec%update_c .and. .not. (spec%a_strided .or. spec%b_strided)) call asm(text, 'mov %r8, %r11')
         call asm(text, 'mov %rdx, %r10')
         if (.not. spec%a_strided) call asm(text, 'mov %rdi, %rax')
         call asm(text, 'xor %edx, %edx')
@@ -245,7 +273,7 @@ contains
         call label(text, '.L'//lab//'_main')
         call steps(text, spec%k_unroll)
         if (.not. spec%a_strided) call asm(text, 'add $'//itoa(8*spec%mr*spec%k_unroll)//', %rsi')
-        call asm(text, 'add $'//itoa(8*spec%nr*spec%k_unroll)//', %rdx')
+        call advance_b(text, spec%k_unroll)
         call asm(text, 'dec %rax')
         call asm(text, 'jnz .L'//lab//'_main')
         call label(text, '.L'//lab//'_tail')
@@ -254,7 +282,7 @@ contains
         call label(text, '.L'//lab//'_one')
         call steps(text, 1)
         if (.not. spec%a_strided) call asm(text, 'add $'//itoa(8*spec%mr)//', %rsi')
-        call asm(text, 'add $'//itoa(8*spec%nr)//', %rdx')
+        call advance_b(text, 1)
         call asm(text, 'dec %r9')
         call asm(text, 'jnz .L'//lab//'_one')
         call label(text, '.L'//lab//'_store')
@@ -277,9 +305,47 @@ contains
             end do
         end if
         call asm(text, 'vzeroupper')
+        if (spec%b_strided) then
+            call asm(text, 'pop %r14')
+            call asm(text, 'pop %r13')
+            call asm(text, 'pop %r12')
+        end if
         call asm(text, 'ret')
 
     contains
+
+        ! B moves on by count steps: one row of a packed panel, or 8 bytes in
+        ! each column group of an unpacked B
+        subroutine advance_b(t, count)
+            character(:), allocatable, intent(inout) :: t
+            integer, intent(in) :: count
+            if (spec%b_strided) then
+                call asm(t, 'add $'//itoa(8*count)//', %rdx')
+                if (spec%nr > 3) call asm(t, 'add $'//itoa(8*count)//', %r13')
+                if (spec%nr > 6) call asm(t, 'add $'//itoa(8*count)//', %r14')
+            else
+                call asm(t, 'add $'//itoa(8*spec%nr*count)//', %rdx')
+            end if
+        end subroutine advance_b
+
+        ! address of B element (step s, column jj)
+        function baddr(s, jj) result(addr)
+            integer, intent(in) :: s, jj
+            character(:), allocatable :: addr
+            character(len=4), parameter :: base(0:2) = ['%rdx', '%r13', '%r14']
+            if (spec%b_strided) then
+                select case (mod(jj, 3))
+                case (0)
+                    addr = itoa(8*s)//'('//base(jj/3)//')'
+                case (1)
+                    addr = itoa(8*s)//'('//base(jj/3)//',%r12,1)'
+                case default
+                    addr = itoa(8*s)//'('//base(jj/3)//',%r12,2)'
+                end select
+            else
+                addr = itoa(8*spec%nr*s + 8*jj)//'(%rdx)'
+            end if
+        end function baddr
 
         function reg(i) result(name)
             integer, intent(in) :: i
@@ -302,13 +368,13 @@ contains
                 do jj = 0, spec%nr - 1
                     if (wide .and. mv == 1) then
                         do vv = 0, mv - 1
-                            call asm(t, 'vfmadd231pd '//itoa(boff + 8*jj)//'(%rdx){1to8}, '// &
+                            call asm(t, 'vfmadd231pd '//baddr(s, jj)//'{1to8}, '// &
                                 reg(nacc + vv)//', '//reg(vv + mv*jj))
                         end do
                     else
                         ! one broadcast per B element, reused for the mv A vectors; AVX-512
                         ! with mv = 1 broadcasts from memory inside the FMA instead
-                        call asm(t, 'vbroadcastsd '//itoa(boff + 8*jj)//'(%rdx), '//reg(nacc + mv))
+                        call asm(t, 'vbroadcastsd '//baddr(s, jj)//', '//reg(nacc + mv))
                         do vv = 0, mv - 1
                             call asm(t, 'vfmadd231pd '//reg(nacc + mv)//', '//reg(nacc + vv)//', '// &
                                 reg(vv + mv*jj))
@@ -339,6 +405,17 @@ contains
         call asm(text, 'stp d10, d11, [sp, #16]')
         call asm(text, 'stp d12, d13, [sp, #32]')
         call asm(text, 'stp d14, d15, [sp, #48]')
+        if (spec%b_strided) then
+            ! (k, a, b, ldb, c, ldc) in x0..x5: one pointer per column of B in
+            ! x12..x17, each moving 8 bytes per step
+            call asm(text, 'lsl x6, x3, #3')
+            call asm(text, 'mov x12, x2')
+            do j = 1, spec%nr - 1
+                call asm(text, 'add x'//itoa(12 + j)//', x'//itoa(11 + j)//', x6')
+            end do
+            call asm(text, 'mov x3, x4')
+            call asm(text, 'mov x4, x5')
+        end if
         if (spec%a_strided) then
             ! (k, a, lda, b, c, ldc) in x0..x5 to the registers below; x14 =
             ! lda bytes minus the mr doubles a step's loads advance
@@ -432,13 +509,20 @@ contains
                     c = c - min(c, 4)
                 end do
                 if (spec%a_strided) call asm(t, 'add x1, x1, x14')
-                f = nacc + mv
-                c = nb
-                do while (c > 0)
-                    call asm(t, 'ld1 '//reglist(f, min(c, 4))//', [x2], #'//itoa(16*min(c, 4)))
-                    f = f + min(c, 4)
-                    c = c - min(c, 4)
-                end do
+                if (spec%b_strided) then
+                    do jj = 0, spec%nr - 1
+                        call asm(t, 'ld1 {v'//itoa(nacc + mv + jj/2)//'.d}['//itoa(mod(jj, 2))//'], [x'// &
+                            itoa(12 + jj)//'], #8')
+                    end do
+                else
+                    f = nacc + mv
+                    c = nb
+                    do while (c > 0)
+                        call asm(t, 'ld1 '//reglist(f, min(c, 4))//', [x2], #'//itoa(16*min(c, 4)))
+                        f = f + min(c, 4)
+                        c = c - min(c, 4)
+                    end do
+                end if
                 if (spec%prefetch_a > 0) &
                     call asm(t, 'prfm pldl1keep, [x1, #'//itoa(spec%prefetch_a)//']')
                 do jj = 0, spec%nr - 1

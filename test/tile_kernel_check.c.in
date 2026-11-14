@@ -10,6 +10,8 @@
 
 #if defined(TILE_A_STRIDED)
 void TILE_NAME(int64_t k, const double *a, int64_t lda, const double *b, double *c, int64_t ldc);
+#elif defined(TILE_B_STRIDED)
+void TILE_NAME(int64_t k, const double *a, const double *b, int64_t ldb, double *c, int64_t ldc);
 #elif defined(TILE_UPDATE_C)
 void TILE_NAME(int64_t k, const double *a, const double *b, double *c, int64_t ldc);
 #else
@@ -41,15 +43,22 @@ int main(void) {
         enum { LDA = MR };
 #endif
         double *a = malloc((size_t)LDA * (k + 1) * sizeof *a);
-        double *b = malloc((size_t)NR * (k + 1) * sizeof *b);
+#if defined(TILE_B_STRIDED)
+        const int ldb = k + 3;
+#define BAT(p, j) b[(p) + ldb * (j)]
+#else
+#define BAT(p, j) b[(j) + NR * (p)]
+#endif
+        double *b = malloc((size_t)NR * (k + 4) * sizeof *b);
         double acc[MR * NR], ref[MR * NR] = {0}, scale[MR * NR] = {0};
         for (int i = 0; i < LDA * k; i++) a[i] = sin(1.0 + i);
-        for (int i = 0; i < NR * k; i++) b[i] = cos(2.0 + 3 * i);
+        for (int j = 0; j < NR; j++)
+            for (int p = 0; p < k; p++) BAT(p, j) = cos(2.0 + 3 * (j + NR * p));
         for (int p = 0; p < k; p++)
             for (int j = 0; j < NR; j++)
                 for (int i = 0; i < MR; i++) {
-                    ref[i + MR * j] += a[i + LDA * p] * b[j + NR * p];
-                    scale[i + MR * j] += fabs(a[i + LDA * p] * b[j + NR * p]);
+                    ref[i + MR * j] += a[i + LDA * p] * BAT(p, j);
+                    scale[i + MR * j] += fabs(a[i + LDA * p] * BAT(p, j));
                 }
 #if defined(TILE_UPDATE_C)
         enum { LDC = MR + 3 };
@@ -63,6 +72,8 @@ int main(void) {
             }
 #if defined(TILE_A_STRIDED)
         TILE_NAME(k, a, LDA, b, c, LDC);
+#elif defined(TILE_B_STRIDED)
+        TILE_NAME(k, a, b, ldb, c, LDC);
 #else
         TILE_NAME(k, a, b, c, LDC);
 #endif
