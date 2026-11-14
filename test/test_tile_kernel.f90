@@ -36,6 +36,12 @@ program test_tile_kernel
     call require(ok .and. count_of(src, 'vaddpd') == 12 .and. index(src, 'mov %r8, %r11') > 0, &
         'AVX2 C update: one add per accumulator, ldc kept out of the division')
     call require(index(src, 'double *c, int64_t ldc') > 0, 'C-update prototype')
+    s%a_strided = .true.
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(ok .and. count_of(src, 'add %rdi, %rsi') == 5 .and. index(src, 'shl $3, %rdi') > 0, &
+        'strided A advances by lda per step')
+    call require(index(src, 'int64_t lda') > 0, 'strided prototype')
+    s%a_strided = .false.
     s%update_c = .false.
 
     s%isa = ISA_X86_64_AVX512
@@ -62,6 +68,10 @@ program test_tile_kernel
     src = emit_tile_kernel_c_asm(s, ok, msg)
     call require(ok .and. count_of(src, 'fadd') == 24 .and. index(src, 'lsl x4, x4, #3') > 0, &
         'NEON C update through the free A registers')
+    s%a_strided = .true.
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(ok .and. count_of(src, 'add x1, x1, x14') == 5, 'NEON strided A')
+    s%a_strided = .false.
     s%update_c = .false.
     s%nr = 5
     src = emit_tile_kernel_c_asm(s, ok, msg)

@@ -16,9 +16,12 @@ module fortgen_tile_kernel
     !
     ! C prototypes of the emitted kernels: the tile alone, or added to C in
     ! place (update_c), C column-major with leading dimension ldc; the caller
-    ! folds alpha into the packed A and applies beta before the product:
+    ! folds alpha into a packed operand and applies beta before the product:
     !     void name(int64_t k, const double *a, const double *b, double *acc);
     !     void name(int64_t k, const double *a, const double *b, double *c, int64_t ldc);
+    ! With a_strided, A is read unpacked from a column-major matrix:
+    !     void name(int64_t k, const double *a, int64_t lda, const double *b,
+    !               double *c_or_acc, int64_t ldc);
     implicit none
     private
 
@@ -47,6 +50,9 @@ module fortgen_tile_kernel
         integer :: prefetch_a = 0
         !> Add the tile to C(ldc, *) in place instead of storing it to acc.
         logical :: update_c = .false.
+        !> Read A unpacked from a column-major matrix with leading dimension
+        !> lda (one column of the tile per step of k) instead of a packed panel.
+        logical :: a_strided = .false.
     end type tile_kernel_spec_t
 
 contains
@@ -176,7 +182,10 @@ contains
         call add(source, '#define FG_SYM(name) #name')
         call add(source, '#define FG_L ".L"')
         call add(source, '#endif')
-        if (spec%update_c) then
+        if (spec%a_strided) then
+            call add(source, 'void '//spec%name//'(int64_t k, const double *a, int64_t lda, const double *b, '// &
+                'double *'//merge('c  ', 'acc', spec%update_c)//', int64_t ldc);')
+        else if (spec%update_c) then
             call add(source, 'void '//spec%name//'(int64_t k, const double *a, const double *b, double *c, int64_t ldc);')
         else
             call add(source, 'void '//spec%name//'(int64_t k, const double *a, const double *b, double *acc);')
@@ -211,11 +220,21 @@ contains
         do v = 0, nacc - 1
             call asm(text, 'vxorpd '//reg(v)//', '//reg(v)//', '//reg(v))
         end do
+        if (spec%a_strided) then
+            ! (k, a, lda, b, c, ldc) in (rdi, rsi, rdx, rcx, r8, r9) to the
+            ! registers below: lda in bytes in rdi once k is in rax
+            call asm(text, 'mov %rdi, %rax')
+            call asm(text, 'mov %rdx, %rdi')
+            call asm(text, 'shl $3, %rdi')
+            call asm(text, 'mov %rcx, %rdx')
+            call asm(text, 'mov %r8, %rcx')
+            call asm(text, 'mov %r9, %r11')
+        end if
         ! rax = k / k_unroll, r9 = k mod k_unroll; div clobbers rdx (b)
         ! update_c: ldc arrives in r8, which the division below overwrites
-        if (spec%update_c) call asm(text, 'mov %r8, %r11')
+        if (spec%update_c .and. .not. spec%a_strided) call asm(text, 'mov %r8, %r11')
         call asm(text, 'mov %rdx, %r10')
-        call asm(text, 'mov %rdi, %rax')
+        if (.not. spec%a_strided) call asm(text, 'mov %rdi, %rax')
         call asm(text, 'xor %edx, %edx')
         call asm(text, 'mov $'//itoa(spec%k_unroll)//', %r8')
         call asm(text, 'div %r8')
@@ -225,7 +244,7 @@ contains
         call asm(text, 'jz .L'//lab//'_tail')
         call label(text, '.L'//lab//'_main')
         call steps(text, spec%k_unroll)
-        call asm(text, 'add $'//itoa(8*spec%mr*spec%k_unroll)//', %rsi')
+        if (.not. spec%a_strided) call asm(text, 'add $'//itoa(8*spec%mr*spec%k_unroll)//', %rsi')
         call asm(text, 'add $'//itoa(8*spec%nr*spec%k_unroll)//', %rdx')
         call asm(text, 'dec %rax')
         call asm(text, 'jnz .L'//lab//'_main')
@@ -234,7 +253,7 @@ contains
         call asm(text, 'jz .L'//lab//'_store')
         call label(text, '.L'//lab//'_one')
         call steps(text, 1)
-        call asm(text, 'add $'//itoa(8*spec%mr)//', %rsi')
+        if (.not. spec%a_strided) call asm(text, 'add $'//itoa(8*spec%mr)//', %rsi')
         call asm(text, 'add $'//itoa(8*spec%nr)//', %rdx')
         call asm(text, 'dec %r9')
         call asm(text, 'jnz .L'//lab//'_one')
@@ -273,9 +292,9 @@ contains
             integer, intent(in) :: count
             integer :: s, vv, jj, aoff, boff
             do s = 0, count - 1
-                aoff = 8*spec%mr*s
+                aoff = merge(0, 8*spec%mr*s, spec%a_strided)
                 boff = 8*spec%nr*s
-                if (spec%prefetch_a > 0) &
+                if (spec%prefetch_a > 0 .and. .not. spec%a_strided) &
                     call asm(t, 'prefetcht0 '//itoa(spec%prefetch_a + aoff)//'(%rsi)')
                 do vv = 0, mv - 1
                     call asm(t, 'vmovupd '//itoa(aoff + bytes*vv)//'(%rsi), '//reg(nacc + vv))
@@ -296,6 +315,7 @@ contains
                         end do
                     end if
                 end do
+                if (spec%a_strided) call asm(t, 'add %rdi, %rsi')
             end do
         end subroutine steps
 
@@ -319,6 +339,15 @@ contains
         call asm(text, 'stp d10, d11, [sp, #16]')
         call asm(text, 'stp d12, d13, [sp, #32]')
         call asm(text, 'stp d14, d15, [sp, #48]')
+        if (spec%a_strided) then
+            ! (k, a, lda, b, c, ldc) in x0..x5 to the registers below; x14 =
+            ! lda bytes minus the mr doubles a step's loads advance
+            call asm(text, 'lsl x12, x2, #3')
+            call asm(text, 'sub x14, x12, #'//itoa(8*spec%mr))
+            call asm(text, 'mov x2, x3')
+            call asm(text, 'mov x3, x4')
+            call asm(text, 'mov x4, x5')
+        end if
         do v = 0, nacc - 1
             call asm(text, 'movi v'//itoa(v)//'.2d, #0')
         end do
@@ -402,6 +431,7 @@ contains
                     f = f + min(c, 4)
                     c = c - min(c, 4)
                 end do
+                if (spec%a_strided) call asm(t, 'add x1, x1, x14')
                 f = nacc + mv
                 c = nb
                 do while (c > 0)

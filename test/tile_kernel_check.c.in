@@ -8,7 +8,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#if defined(TILE_UPDATE_C)
+#if defined(TILE_A_STRIDED)
+void TILE_NAME(int64_t k, const double *a, int64_t lda, const double *b, double *c, int64_t ldc);
+#elif defined(TILE_UPDATE_C)
 void TILE_NAME(int64_t k, const double *a, const double *b, double *c, int64_t ldc);
 #else
 void TILE_NAME(int64_t k, const double *a, const double *b, double *acc);
@@ -33,16 +35,21 @@ int main(void) {
     }
     for (unsigned c = 0; c < sizeof ks / sizeof *ks; c++) {
         const int k = ks[c];
-        double *a = malloc((size_t)MR * (k + 1) * sizeof *a);
+#if defined(TILE_A_STRIDED)
+        enum { LDA = MR + 5 };
+#else
+        enum { LDA = MR };
+#endif
+        double *a = malloc((size_t)LDA * (k + 1) * sizeof *a);
         double *b = malloc((size_t)NR * (k + 1) * sizeof *b);
         double acc[MR * NR], ref[MR * NR] = {0}, scale[MR * NR] = {0};
-        for (int i = 0; i < MR * k; i++) a[i] = sin(1.0 + i);
+        for (int i = 0; i < LDA * k; i++) a[i] = sin(1.0 + i);
         for (int i = 0; i < NR * k; i++) b[i] = cos(2.0 + 3 * i);
         for (int p = 0; p < k; p++)
             for (int j = 0; j < NR; j++)
                 for (int i = 0; i < MR; i++) {
-                    ref[i + MR * j] += a[i + MR * p] * b[j + NR * p];
-                    scale[i + MR * j] += fabs(a[i + MR * p] * b[j + NR * p]);
+                    ref[i + MR * j] += a[i + LDA * p] * b[j + NR * p];
+                    scale[i + MR * j] += fabs(a[i + LDA * p] * b[j + NR * p]);
                 }
 #if defined(TILE_UPDATE_C)
         enum { LDC = MR + 3 };
@@ -54,7 +61,11 @@ int main(void) {
                 ref[i + MR * j] += c[i + LDC * j];
                 scale[i + MR * j] += fabs(c[i + LDC * j]);
             }
+#if defined(TILE_A_STRIDED)
+        TILE_NAME(k, a, LDA, b, c, LDC);
+#else
         TILE_NAME(k, a, b, c, LDC);
+#endif
         for (int j = 0; j < NR; j++) {
             for (int i = 0; i < MR; i++) acc[i + MR * j] = c[i + LDC * j];
             for (int i = MR; i < LDC; i++)
