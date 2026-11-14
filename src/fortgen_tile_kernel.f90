@@ -207,9 +207,16 @@ contains
         call add(source, '#if defined(__APPLE__)')
         call add(source, '#define FG_SYM(name) "_" #name')
         call add(source, '#define FG_L "L"')
+        call add(source, '#define FG_TYPE(name) ""')
+        call add(source, '#define FG_SIZE(name) ""')
         call add(source, '#else')
         call add(source, '#define FG_SYM(name) #name')
         call add(source, '#define FG_L ".L"')
+        ! ELF type and size, so that profilers attribute samples to the kernel
+        ! and not to whatever symbol precedes the code after it
+        call add(source, '#define FG_TYPE(name) ".type " #name ", '// &
+            merge('%function', '@function', spec%isa >= ISA_AARCH64_NEON)//'\n"')
+        call add(source, '#define FG_SIZE(name) ".size " #name ", .-" #name "\n"')
         call add(source, '#endif')
         if (spec%a_strided) then
             call add(source, 'void '//spec%name//'(int64_t k, const double *a, int64_t lda, const double *b, '// &
@@ -226,8 +233,10 @@ contains
         call add(source, '    ".text\n"')
         call add(source, '    ".p2align 5\n"')
         call add(source, '    ".globl " FG_SYM('//spec%name//') "\n"')
+        call add(source, '    FG_TYPE('//spec%name//')')
         call add(source, '    FG_SYM('//spec%name//') ":\n"')
         source = source//body
+        call add(source, '    FG_SIZE('//spec%name//')')
         call add(source, ');')
         call add(source, '#endif')
     end function emit_tile_kernel_c_asm

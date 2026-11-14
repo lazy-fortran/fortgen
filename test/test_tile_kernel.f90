@@ -30,6 +30,8 @@ program test_tile_kernel
         'local labels for Mach-O and ELF')
     call require(count_of(src, '".L') == 1, 'ELF local labels only through FG_L')
     call require(index(src, 'defined(__x86_64__)') > 0, 'x86 kernel compiled only on x86')
+    call require(index(src, '", @function\n"') > 0 .and. count_of(src, 'FG_SIZE(') == 3, &
+        'ELF type and size of the kernel symbol')
 
     s%update_c = .true.
     src = emit_tile_kernel_c_asm(s, ok, msg)
