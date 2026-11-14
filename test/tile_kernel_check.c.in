@@ -18,8 +18,35 @@ void TILE_NAME(int64_t k, const double *a, const double *b, double *c, int64_t l
 void TILE_NAME(int64_t k, const double *a, const double *b, double *acc);
 #endif
 
+#if defined(TILE_NEEDS_AMX)
+#include <setjmp.h>
+#include <signal.h>
+static sigjmp_buf amx_jump;
+static void amx_missing(int sig) {
+    (void)sig;
+    siglongjmp(amx_jump, 1);
+}
+/* enable and disable AMX once; SIGILL where the coprocessor is absent */
+static int amx_present(void) {
+    struct sigaction catch_ill, previous;
+    int present = 0;
+    catch_ill.sa_handler = amx_missing;
+    catch_ill.sa_flags = 0;
+    sigemptyset(&catch_ill.sa_mask);
+    sigaction(SIGILL, &catch_ill, &previous);
+    if (!sigsetjmp(amx_jump, 1)) {
+        __asm__ volatile("nop\nnop\nnop\n.word 0x201220\nnop\nnop\nnop\n.word 0x201221" ::: "memory");
+        present = 1;
+    }
+    sigaction(SIGILL, &previous, NULL);
+    return present;
+}
+#endif
+
 static int supported(void) {
-#if defined(TILE_NEEDS_AVX512)
+#if defined(TILE_NEEDS_AMX)
+    return amx_present();
+#elif defined(TILE_NEEDS_AVX512)
     return __builtin_cpu_supports("avx512f");
 #elif defined(TILE_NEEDS_AVX2)
     return __builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma");

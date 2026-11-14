@@ -88,6 +88,45 @@ program test_tile_kernel
     src = emit_tile_kernel_c_asm(s, ok, msg)
     call require(.not. ok, 'NEON loads B in pairs')
 
+    ! AMX: 32x16 fills the 8 fp64 accumulators; per step two pair loads of A,
+    ! one of B and 8 outer products, all operands in registers; C moves in
+    ! pairs of Z rows
+    s%isa = ISA_AARCH64_AMX
+    s%mr = 32
+    s%nr = 16
+    s%k_unroll = 2
+    s%prefetch_a = 0
+    s%update_c = .true.
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(ok .and. tile_register_count(s) == 8, 'AMX 32x16')
+    call require(count_of(src, '.word 0x20114') + count_of(src, '.word 0x20115') == 3*8, &
+        'AMX fp64 outer products in steps 0 and 1 and the tail')
+    call require(count_of(src, '.word 0x201001') == 3 .and. count_of(src, '.word 0x201005') == 3 .and. &
+        count_of(src, '.word 0x201022') == 3, 'AMX loads A and B in pairs through tagged pointers')
+    call require(count_of(src, '.word 0x201090') == 16*2 .and. count_of(src, '.word 0x2010B0') == 16*2, &
+        'AMX moves C in pairs of Z rows')
+    call require(count_of(src, '.word 0x201220') == 1 .and. count_of(src, '.word 0x201221') == 1, &
+        'AMX enabled and disabled once')
+    call require(count_of(src, 'movk') == 7 .and. index(src, 'stp x19, x20') > 0 .and. &
+        index(src, 'ldp x21, x22') > 0, 'AMX operands built once, x19-x22 kept')
+    call require(index(src, 'defined(__APPLE__)') > 0 .and. index(src, 'ldc);') > 0, 'AMX only on Apple')
+    s%update_c = .false.
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(ok .and. count_of(src, 'stp q0, q0') == 2 .and. index(src, 'mov x4, #256') > 0, &
+        'AMX zeroes acc and moves it like C')
+    s%mr = 64
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(.not. ok .and. index(msg, 'registers') > 0, 'AMX 64x16 needs 16 of 8 accumulators')
+    s%mr = 32
+    s%nr = 12
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(.not. ok, 'AMX nr in whole Y registers')
+    s%nr = 16
+    s%b_strided = .true.
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(.not. ok, 'AMX cannot read B unpacked')
+    s%b_strided = .false.
+
     s%isa = 99
     src = emit_tile_kernel_c_asm(s, ok, msg)
     call require(.not. ok .and. index(msg, 'unknown') > 0, 'unknown instruction set rejected')

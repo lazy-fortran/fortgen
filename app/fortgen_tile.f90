@@ -2,7 +2,7 @@ program fortgen_tile
     ! fortgen-tile ISA MR NR K_UNROLL PREFETCH NAME OUTPUT [update_c,a_strided,b_strided]
     ! Writes one register-tile kernel as a C translation unit with the assembly.
     use fortgen_tile_kernel, only: tile_kernel_spec_t, emit_tile_kernel_c_asm, &
-        ISA_X86_64_AVX2_FMA, ISA_X86_64_AVX512, ISA_AARCH64_NEON
+        ISA_X86_64_AVX2_FMA, ISA_X86_64_AVX512, ISA_AARCH64_NEON, ISA_AARCH64_AMX
     implicit none
     type(tile_kernel_spec_t) :: spec
     character(len=256) :: arg(8)
@@ -12,7 +12,7 @@ program fortgen_tile
 
     if (command_argument_count() < 7 .or. command_argument_count() > 8) then
         write (*, '(a)') 'usage: fortgen-tile ISA MR NR K_UNROLL PREFETCH NAME OUTPUT [update_c,a_strided,b_strided]'
-        write (*, '(a)') '  ISA: x86_64_avx2_fma, x86_64_avx512, aarch64_neon'
+        write (*, '(a)') '  ISA: x86_64_avx2_fma, x86_64_avx512, aarch64_neon, aarch64_amx'
         error stop 2
     end if
     arg = ''
@@ -26,6 +26,8 @@ program fortgen_tile
         spec%isa = ISA_X86_64_AVX512
     case ('aarch64_neon')
         spec%isa = ISA_AARCH64_NEON
+    case ('aarch64_amx')
+        spec%isa = ISA_AARCH64_AMX
     case default
         write (*, '(a)') 'fortgen-tile: unknown ISA '//trim(arg(1))
         error stop 2
