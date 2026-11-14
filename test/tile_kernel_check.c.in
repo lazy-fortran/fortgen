@@ -1,12 +1,18 @@
 /* Runs one emitted tile kernel (TILE_NAME, TILE_MR x TILE_NR) against a
-   direct sum for several k, including k = 0 and every unroll remainder.
+   direct sum for several k, including k = 0 and every unroll remainder. With
+   TILE_UPDATE_C the kernel adds the tile to C (leading dimension MR + 3) and
+   must leave the padding rows alone.
    Exit 77 (skipped) when the CPU lacks the kernel's instruction set. */
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
+#if defined(TILE_UPDATE_C)
+void TILE_NAME(int64_t k, const double *a, const double *b, double *c, int64_t ldc);
+#else
 void TILE_NAME(int64_t k, const double *a, const double *b, double *acc);
+#endif
 
 static int supported(void) {
 #if defined(TILE_NEEDS_AVX512)
@@ -38,8 +44,29 @@ int main(void) {
                     ref[i + MR * j] += a[i + MR * p] * b[j + NR * p];
                     scale[i + MR * j] += fabs(a[i + MR * p] * b[j + NR * p]);
                 }
+#if defined(TILE_UPDATE_C)
+        enum { LDC = MR + 3 };
+        double c[LDC * NR];
+        for (int j = 0; j < NR; j++)
+            for (int i = 0; i < LDC; i++) c[i + LDC * j] = 0.25 * i - 0.5 * j;
+        for (int j = 0; j < NR; j++)
+            for (int i = 0; i < MR; i++) {
+                ref[i + MR * j] += c[i + LDC * j];
+                scale[i + MR * j] += fabs(c[i + LDC * j]);
+            }
+        TILE_NAME(k, a, b, c, LDC);
+        for (int j = 0; j < NR; j++) {
+            for (int i = 0; i < MR; i++) acc[i + MR * j] = c[i + LDC * j];
+            for (int i = MR; i < LDC; i++)
+                if (c[i + LDC * j] != 0.25 * i - 0.5 * j) {
+                    printf("k = %d: padding row %d of column %d changed\n", k, i, j);
+                    return 1;
+                }
+        }
+#else
         for (int i = 0; i < MR * NR; i++) acc[i] = NAN;
         TILE_NAME(k, a, b, acc);
+#endif
         for (int i = 0; i < MR * NR; i++) {
             /* both sums round differently; bound by k ulp of the absolute sum */
             if (!(fabs(acc[i] - ref[i]) <= 4.0 * (k + 1) * 1.2e-16 * scale[i])) {

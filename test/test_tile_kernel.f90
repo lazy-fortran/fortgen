@@ -31,6 +31,13 @@ program test_tile_kernel
     call require(count_of(src, '".L') == 1, 'ELF local labels only through FG_L')
     call require(index(src, 'defined(__x86_64__)') > 0, 'x86 kernel compiled only on x86')
 
+    s%update_c = .true.
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(ok .and. count_of(src, 'vaddpd') == 12 .and. index(src, 'mov %r8, %r11') > 0, &
+        'AVX2 C update: one add per accumulator, ldc kept out of the division')
+    call require(index(src, 'double *c, int64_t ldc') > 0, 'C-update prototype')
+    s%update_c = .false.
+
     s%isa = ISA_X86_64_AVX512
     s%mr = 24
     s%nr = 8
@@ -51,6 +58,11 @@ program test_tile_kernel
     call require(count_of(src, 'fmla') == 5*24, 'NEON FMA count')
     call require(index(src, 'stp d8, d9, [sp, #-64]!') > 0 .and. &
         index(src, 'ldp d8, d9, [sp], #64') > 0, 'NEON keeps d8-d15')
+    s%update_c = .true.
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(ok .and. count_of(src, 'fadd') == 24 .and. index(src, 'lsl x4, x4, #3') > 0, &
+        'NEON C update through the free A registers')
+    s%update_c = .false.
     s%nr = 5
     src = emit_tile_kernel_c_asm(s, ok, msg)
     call require(.not. ok, 'NEON loads B in pairs')

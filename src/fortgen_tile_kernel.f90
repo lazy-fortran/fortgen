@@ -14,8 +14,11 @@ module fortgen_tile_kernel
     ! path. The kernels hold the tile in vector registers, broadcast B, load
     ! A with one instruction per vector and unroll k.
     !
-    ! C prototype of every emitted kernel:
+    ! C prototypes of the emitted kernels: the tile alone, or added to C in
+    ! place (update_c), C column-major with leading dimension ldc; the caller
+    ! folds alpha into the packed A and applies beta before the product:
     !     void name(int64_t k, const double *a, const double *b, double *acc);
+    !     void name(int64_t k, const double *a, const double *b, double *c, int64_t ldc);
     implicit none
     private
 
@@ -42,6 +45,8 @@ module fortgen_tile_kernel
         integer :: k_unroll = 4
         !> Prefetch distance into the A panel in bytes (0: none).
         integer :: prefetch_a = 0
+        !> Add the tile to C(ldc, *) in place instead of storing it to acc.
+        logical :: update_c = .false.
     end type tile_kernel_spec_t
 
 contains
@@ -171,7 +176,11 @@ contains
         call add(source, '#define FG_SYM(name) #name')
         call add(source, '#define FG_L ".L"')
         call add(source, '#endif')
-        call add(source, 'void '//spec%name//'(int64_t k, const double *a, const double *b, double *acc);')
+        if (spec%update_c) then
+            call add(source, 'void '//spec%name//'(int64_t k, const double *a, const double *b, double *c, int64_t ldc);')
+        else
+            call add(source, 'void '//spec%name//'(int64_t k, const double *a, const double *b, double *acc);')
+        end if
         call add(source, '__asm__(')
         call add(source, '    ".text\n"')
         call add(source, '    ".p2align 5\n"')
@@ -203,6 +212,8 @@ contains
             call asm(text, 'vxorpd '//reg(v)//', '//reg(v)//', '//reg(v))
         end do
         ! rax = k / k_unroll, r9 = k mod k_unroll; div clobbers rdx (b)
+        ! update_c: ldc arrives in r8, which the division below overwrites
+        if (spec%update_c) call asm(text, 'mov %r8, %r11')
         call asm(text, 'mov %rdx, %r10')
         call asm(text, 'mov %rdi, %rax')
         call asm(text, 'xor %edx, %edx')
@@ -228,11 +239,24 @@ contains
         call asm(text, 'dec %r9')
         call asm(text, 'jnz .L'//lab//'_one')
         call label(text, '.L'//lab//'_store')
-        do j = 0, spec%nr - 1
-            do v = 0, mv - 1
-                call asm(text, 'vmovupd '//reg(v + mv*j)//', '//itoa(8*(width*v + spec%mr*j))//'(%rcx)')
+        if (spec%update_c) then
+            ! C(:, j) += tile(:, j), column pointer in rax, ldc in bytes in r11
+            call asm(text, 'shl $3, %r11')
+            call asm(text, 'mov %rcx, %rax')
+            do j = 0, spec%nr - 1
+                do v = 0, mv - 1
+                    call asm(text, 'vaddpd '//itoa(bytes*v)//'(%rax), '//reg(v + mv*j)//', '//reg(v + mv*j))
+                    call asm(text, 'vmovupd '//reg(v + mv*j)//', '//itoa(bytes*v)//'(%rax)')
+                end do
+                if (j < spec%nr - 1) call asm(text, 'add %r11, %rax')
             end do
-        end do
+        else
+            do j = 0, spec%nr - 1
+                do v = 0, mv - 1
+                    call asm(text, 'vmovupd '//reg(v + mv*j)//', '//itoa(8*(width*v + spec%mr*j))//'(%rcx)')
+                end do
+            end do
+        end if
         call asm(text, 'vzeroupper')
         call asm(text, 'ret')
 
@@ -313,16 +337,39 @@ contains
         call asm(text, 'subs x11, x11, #1')
         call asm(text, 'b.ne .L'//lab//'_one')
         call label(text, '.L'//lab//'_store')
-        ! column j is registers mv*j .. mv*j+mv-1, contiguous in acc
-        do j = 0, spec%nr - 1
-            first = mv*j
-            cnt = mv
-            do while (cnt > 0)
-                call asm(text, 'st1 '//reglist(first, min(cnt, 4))//', [x3], #'//itoa(16*min(cnt, 4)))
-                first = first + min(cnt, 4)
-                cnt = cnt - min(cnt, 4)
+        if (spec%update_c) then
+            ! C(:, j) += tile(:, j): column pointer x5, ldc in bytes in x4; the
+            ! A registers, free after the loop, hold each piece of C
+            call asm(text, 'lsl x4, x4, #3')
+            call asm(text, 'mov x5, x3')
+            do j = 0, spec%nr - 1
+                call asm(text, 'mov x6, x5')
+                first = mv*j
+                cnt = mv
+                do while (cnt > 0)
+                    call asm(text, 'ld1 '//reglist(nacc, min(cnt, 4))//', [x6]')
+                    do v = 0, min(cnt, 4) - 1
+                        call asm(text, 'fadd v'//itoa(first + v)//'.2d, v'//itoa(first + v)//'.2d, v'// &
+                            itoa(nacc + v)//'.2d')
+                    end do
+                    call asm(text, 'st1 '//reglist(first, min(cnt, 4))//', [x6], #'//itoa(16*min(cnt, 4)))
+                    first = first + min(cnt, 4)
+                    cnt = cnt - min(cnt, 4)
+                end do
+                if (j < spec%nr - 1) call asm(text, 'add x5, x5, x4')
             end do
-        end do
+        else
+            ! column j is registers mv*j .. mv*j+mv-1, contiguous in acc
+            do j = 0, spec%nr - 1
+                first = mv*j
+                cnt = mv
+                do while (cnt > 0)
+                    call asm(text, 'st1 '//reglist(first, min(cnt, 4))//', [x3], #'//itoa(16*min(cnt, 4)))
+                    first = first + min(cnt, 4)
+                    cnt = cnt - min(cnt, 4)
+                end do
+            end do
+        end if
         call asm(text, 'ldp d10, d11, [sp, #16]')
         call asm(text, 'ldp d12, d13, [sp, #32]')
         call asm(text, 'ldp d14, d15, [sp, #48]')
