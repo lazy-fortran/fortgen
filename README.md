@@ -1,5 +1,7 @@
 # fortgen
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24223509.svg)](https://doi.org/10.5281/zenodo.24223509)
+
 fortgen is a small Fortran library and command-line tool for generating
 numerical source code. It defines a scalar kernel intermediate representation
 (IR), a topologically ordered directed acyclic graph, and emits it as Fortran,
@@ -106,3 +108,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for checks and
 ## Licence
 
 MIT, see [LICENSE](LICENSE).
+
+## Citation
+
+Cite fortgen through its Zenodo record,
+[doi:10.5281/zenodo.24223509](https://doi.org/10.5281/zenodo.24223509), which
+always resolves to the latest release; release 0.2.0 is
+[doi:10.5281/zenodo.24223510](https://doi.org/10.5281/zenodo.24223510).
+`CITATION.cff` holds the full citation metadata.
