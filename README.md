@@ -5,8 +5,11 @@
 fortgen is a small Fortran library and command-line tool for generating
 numerical source code. It defines a scalar kernel intermediate representation
 (IR), a topologically ordered directed acyclic graph, and emits it as Fortran,
-CUDA or Python, together with the
-text utilities that code generators in the lazy-fortran projects share.
+CUDA or Python; it emits the register tiles of dense products as assembly for
+x86_64 (AVX2, AVX-512) and aarch64 (NEON). For each kind of kernel and target
+it uses the backend that measures fastest ([docs/backends.md](docs/backends.md)).
+It also holds the text utilities that code generators in the lazy-fortran
+projects share.
 
 Status: under development; the kernel IR v1 format is versioned, other
 interfaces may change.
@@ -25,6 +28,9 @@ interfaces may change.
 - Fixed-degree tensor-product polynomial evaluation with fused partial
   derivatives for Fortran, OpenACC and CUDA
   ([spec/tensor-kernels.md](spec/tensor-kernels.md#horner-polynomial-kernels)).
+- Register-tile kernels `acc = A B^T` for GEMM, as assembly for AVX2+FMA,
+  AVX-512 and NEON that both the GNU and the LLVM assembler accept, tested by
+  running them ([docs/backends.md](docs/backends.md)).
 - A bounded exact expression IR, separate from the floating-point kernel IR
   ([spec/expr-ir-v1.md](spec/expr-ir-v1.md)).
 - Text utilities: an append buffer with geometric growth, line continuation
@@ -62,6 +68,7 @@ CUDA is opt-in; device tests require an explicit `CMAKE_CUDA_ARCHITECTURES`.
 ```sh
 fortgen-codegen fortran test/reciprocal_kernel.fgir reciprocal.f90
 fortgen-codegen cuda|cuda-batch|python INPUT [OUTPUT]
+fortgen-tile x86_64_avx2_fma 8 6 4 0 dgemm_tile dgemm_tile.c
 ```
 
 The compiled tests compare emitted kernels against independent quad-precision
@@ -84,12 +91,14 @@ reference formulas.
 | `fortgen_lagrange_emit` | tensor-product Lagrange interpolation at a point from nodal values, with gradient |
 | `fortgen_derivative_set` | which partial derivatives a kernel emits, shared with FortSym |
 | `fortgen_expr_ir` | exact expression IR |
+| `fortgen_tile_kernel` | register-tile GEMM kernels in assembly |
 
 ## Documentation
 
 - [docs/design.md](docs/design.md): motivation, scope and CUDA batch interface
 - [docs/precision.md](docs/precision.md): CPU precision families
 - [docs/principles.md](docs/principles.md): layer ownership and measurement conventions
+- [docs/backends.md](docs/backends.md): which backend for which kernel, with measurements
 - [docs/migration.md](docs/migration.md): how FortSym and FortAD use fortgen
 - [Status and verification](docs/status.md)
 - [User guide](docs/README.md)

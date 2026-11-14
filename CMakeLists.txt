@@ -44,6 +44,7 @@ target_sources(fortgen PRIVATE
     src/fortgen_lagrange_emit.f90
     src/fortgen_kernel_emit.f90
     src/fortgen_ir_text.f90
+    src/fortgen_tile_kernel.f90
 )
 target_include_directories(fortgen PUBLIC
     $<BUILD_INTERFACE:${CMAKE_Fortran_MODULE_DIRECTORY}>
@@ -51,10 +52,23 @@ target_include_directories(fortgen PUBLIC
 
 add_executable(fortgen-codegen app/fortgen_codegen.f90)
 target_link_libraries(fortgen-codegen PRIVATE fortgen)
+add_executable(fortgen-tile app/fortgen_tile.f90)
+target_link_libraries(fortgen-tile PRIVATE fortgen)
 
 if(FORTGEN_BUILD_TESTING)
     enable_testing()
     find_package(OpenMP REQUIRED COMPONENTS Fortran)
+    # GCC builds with an offload compiler installed (Debian 12's gcc 12 with
+    # nvptx) also compile declare-target kernels for the device, and the link
+    # fails without the device libm. The tests check host behaviour.
+    if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+        include(CheckFortranCompilerFlag)
+        check_fortran_compiler_flag(-foffload=disable FORTGEN_HAVE_FOFFLOAD_DISABLE)
+        if(FORTGEN_HAVE_FOFFLOAD_DISABLE)
+            add_compile_options($<$<COMPILE_LANGUAGE:Fortran>:-foffload=disable>)
+            add_link_options(-foffload=disable)
+        endif()
+    endif()
     add_executable(test_mixed_real test/test_mixed_real.f90)
     target_link_libraries(test_mixed_real PRIVATE fortgen)
     add_test(NAME mixed_real COMMAND test_mixed_real)
@@ -131,6 +145,43 @@ if(FORTGEN_BUILD_TESTING)
         ${CMAKE_CURRENT_BINARY_DIR}/behavior_kernel.f90)
     target_link_libraries(test_compiled_kernel PRIVATE OpenMP::OpenMP_Fortran)
     add_test(NAME compiled_kernel COMMAND test_compiled_kernel)
+    add_executable(test_tile_kernel test/test_tile_kernel.f90)
+    target_link_libraries(test_tile_kernel PRIVATE fortgen)
+    add_test(NAME tile_kernel COMMAND test_tile_kernel)
+    # Emitted tile kernels run against a direct sum; assembly kernels only on
+    # their architecture, and skipped (77) where the CPU lacks the extension.
+    include(CheckLanguage)
+    check_language(C)
+    if(CMAKE_C_COMPILER)
+        enable_language(C)
+        configure_file(test/tile_kernel_check.c.in
+            ${CMAKE_CURRENT_BINARY_DIR}/tile_kernel_check.c COPYONLY)
+        function(fortgen_tile_test isa mr nr unroll needs)
+            set(name tile_${isa}_${mr}x${nr}_u${unroll})
+            set(out ${CMAKE_CURRENT_BINARY_DIR}/${name}.c)
+            add_custom_command(OUTPUT ${out}
+                COMMAND $<TARGET_FILE:fortgen-tile> ${isa} ${mr} ${nr} ${unroll} 256 ${name} ${out}
+                DEPENDS fortgen-tile VERBATIM)
+            add_executable(test_${name} ${CMAKE_CURRENT_BINARY_DIR}/tile_kernel_check.c ${out})
+            target_compile_definitions(test_${name} PRIVATE TILE_NAME=${name}
+                TILE_MR=${mr} TILE_NR=${nr} ${needs})
+            find_library(FORTGEN_LIBM m)
+            if(FORTGEN_LIBM)
+                target_link_libraries(test_${name} PRIVATE ${FORTGEN_LIBM})
+            endif()
+            add_test(NAME ${name} COMMAND test_${name})
+            set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77)
+        endfunction()
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$" AND NOT WIN32)
+            fortgen_tile_test(x86_64_avx2_fma 8 6 4 TILE_NEEDS_AVX2)
+            fortgen_tile_test(x86_64_avx2_fma 12 4 3 TILE_NEEDS_AVX2)
+            fortgen_tile_test(x86_64_avx512 24 8 4 TILE_NEEDS_AVX512)
+            fortgen_tile_test(x86_64_avx512 8 24 2 TILE_NEEDS_AVX512)
+        elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$" AND NOT WIN32)
+            fortgen_tile_test(aarch64_neon 8 6 4 "")
+            fortgen_tile_test(aarch64_neon 12 4 3 "")
+        endif()
+    endif()
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/reciprocal_kernel.f90
         COMMAND $<TARGET_FILE:fortgen-codegen> fortran

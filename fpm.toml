@@ -15,6 +15,11 @@ name = "fortgen-codegen"
 source-dir = "app"
 main = "fortgen_codegen.f90"
 
+[[executable]]
+name = "fortgen-tile"
+source-dir = "app"
+main = "fortgen_tile.f90"
+
 [[test]]
 name = "test_fortgen"
 source-dir = "test"
@@ -79,6 +84,11 @@ main = "test_precision_kernel.f90"
 name = "test_expr_ir"
 source-dir = "test"
 main = "test_expr_ir.f90"
+
+[[test]]
+name = "test_tile_kernel"
+source-dir = "test"
+main = "test_tile_kernel.f90"
 
 [fortran]
 implicit-external = false

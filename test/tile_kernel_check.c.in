@@ -1,0 +1,55 @@
+/* Runs one emitted tile kernel (TILE_NAME, TILE_MR x TILE_NR) against a
+   direct sum for several k, including k = 0 and every unroll remainder.
+   Exit 77 (skipped) when the CPU lacks the kernel's instruction set. */
+#include <math.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+void TILE_NAME(int64_t k, const double *a, const double *b, double *acc);
+
+static int supported(void) {
+#if defined(TILE_NEEDS_AVX512)
+    return __builtin_cpu_supports("avx512f");
+#elif defined(TILE_NEEDS_AVX2)
+    return __builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma");
+#else
+    return 1;
+#endif
+}
+
+int main(void) {
+    enum { MR = TILE_MR, NR = TILE_NR };
+    const int ks[] = {0, 1, 2, 3, 4, 5, 7, 8, 9, 64, 257};
+    if (!supported()) {
+        puts("instruction set not available; skipped");
+        return 77;
+    }
+    for (unsigned c = 0; c < sizeof ks / sizeof *ks; c++) {
+        const int k = ks[c];
+        double *a = malloc((size_t)MR * (k + 1) * sizeof *a);
+        double *b = malloc((size_t)NR * (k + 1) * sizeof *b);
+        double acc[MR * NR], ref[MR * NR] = {0}, scale[MR * NR] = {0};
+        for (int i = 0; i < MR * k; i++) a[i] = sin(1.0 + i);
+        for (int i = 0; i < NR * k; i++) b[i] = cos(2.0 + 3 * i);
+        for (int p = 0; p < k; p++)
+            for (int j = 0; j < NR; j++)
+                for (int i = 0; i < MR; i++) {
+                    ref[i + MR * j] += a[i + MR * p] * b[j + NR * p];
+                    scale[i + MR * j] += fabs(a[i + MR * p] * b[j + NR * p]);
+                }
+        for (int i = 0; i < MR * NR; i++) acc[i] = NAN;
+        TILE_NAME(k, a, b, acc);
+        for (int i = 0; i < MR * NR; i++) {
+            /* both sums round differently; bound by k ulp of the absolute sum */
+            if (!(fabs(acc[i] - ref[i]) <= 4.0 * (k + 1) * 1.2e-16 * scale[i])) {
+                printf("k = %d, element %d: %.17g, expected %.17g\n", k, i, acc[i], ref[i]);
+                return 1;
+            }
+        }
+        free(a);
+        free(b);
+    }
+    puts("tile kernel matches the direct sum");
+    return 0;
+}
