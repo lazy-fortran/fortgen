@@ -82,3 +82,31 @@ place with leading dimension 37, in GFLOP/s:
 | 64x8 | 1 | 80 | 367 |
 
 The NEON 8x6 tile reaches 60 GFLOP/s on the same core.
+
+### WebAssembly
+
+`wasm32_simd128` emits LLVM's WebAssembly assembly for 128-bit SIMD, for
+browsers and node; emscripten's clang assembles it from the same top-level
+asm block. WebAssembly has no registers, only locals, so the tile lives in
+v128 locals that the engine's compiler maps to registers: 32 on arm64
+(JavaScriptCore, which every iPad browser uses, and V8 on Apple silicon),
+16 for V8 on x86_64. A product is `f64x2.mul` followed by `f64x2.add`:
+fused multiply-add exists only in relaxed SIMD, and JavaScriptCore as released
+with macOS 26.6 refuses to compile a module that uses it.
+B is broadcast with `v128.load64_splat`, so packed and unpacked B cost the
+same; the tile is stored or added to C at the end. Locals start at zero, so
+the kernel needs no clearing.
+
+Measured on 15 November 2026 on one core, C added in place with leading
+dimension mr and k = 256, in GFLOP/s:
+
+| tile | k unroll | JavaScriptCore, M3 Ultra | node 26 (V8), M3 Ultra | node 22 (V8), Zen 3 |
+|---|---|---|---|---|
+| 4x4 | 4 | 25.8 | 21.1 | 9.3 |
+| 6x4 | 4 | 27.7 | 23.5 | 9.9 |
+| 8x4 | 4 | 28.6 | 24.2 | 10.7 |
+| 10x4 | 4 | 29.3 | 24.3 | 11.7 |
+| 8x6 | 4 | 28.6 | 14.3 | 11.8 |
+
+A multiply and an add per pair of doubles limit an M3 core to about 32
+GFLOP/s, so JavaScriptCore runs the 8x4 tile close to that limit.

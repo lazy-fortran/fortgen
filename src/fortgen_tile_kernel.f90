@@ -27,6 +27,8 @@ module fortgen_tile_kernel
     !               double *c_or_acc, int64_t ldc);
     ! aarch64_amx targets the matrix coprocessor of Apple M1 to M3: the tile
     ! lives in its Z registers instead of vector registers (see amx_body).
+    ! wasm32_simd128 is WebAssembly with 128-bit SIMD, for browsers and node
+    ! (see wasm_body).
     implicit none
     private
 
@@ -34,12 +36,13 @@ module fortgen_tile_kernel
     public :: emit_tile_kernel_c_asm
     public :: tile_kernel_check, tile_register_count
     public :: ISA_X86_64_AVX2_FMA, ISA_X86_64_AVX512
-    public :: ISA_AARCH64_NEON, ISA_AARCH64_AMX, isa_name, isa_vector_doubles, isa_vector_registers
+    public :: ISA_AARCH64_NEON, ISA_AARCH64_AMX, ISA_WASM32_SIMD128, isa_name, isa_vector_doubles, isa_vector_registers
 
     integer, parameter :: ISA_X86_64_AVX2_FMA = 1
     integer, parameter :: ISA_X86_64_AVX512 = 2
     integer, parameter :: ISA_AARCH64_NEON = 3
     integer, parameter :: ISA_AARCH64_AMX = 4
+    integer, parameter :: ISA_WASM32_SIMD128 = 5
 
     character(len=1), parameter :: nl = new_line('a')
 
@@ -78,6 +81,8 @@ contains
             name = 'aarch64_neon'
         case (ISA_AARCH64_AMX)
             name = 'aarch64_amx'
+        case (ISA_WASM32_SIMD128)
+            name = 'wasm32_simd128'
         case default
             name = 'unknown'
         end select
@@ -90,7 +95,7 @@ contains
             width = 4
         case (ISA_X86_64_AVX512)
             width = 8
-        case (ISA_AARCH64_NEON)
+        case (ISA_AARCH64_NEON, ISA_WASM32_SIMD128)
             width = 2
         case (ISA_AARCH64_AMX)
             width = 8
@@ -109,6 +114,12 @@ contains
         case (ISA_AARCH64_AMX)
             ! fp64 accumulators of 8 x 8 in Z
             count = 8
+        case (ISA_WASM32_SIMD128)
+            ! locals the engine maps to registers: 32 on arm64 (JavaScriptCore
+            ! on the iPad, V8 on Apple silicon); V8 on x86_64 has 16 but spills
+            ! less than it gains (8x4 on Zen 3: 10.7 against 9.3 GFLOP/s for
+            ! 4x4; on M3 JavaScriptCore 28.6 against 25.8)
+            count = 32
         case default
             count = huge(1)
         end select
@@ -133,6 +144,8 @@ contains
             count = mv*spec%nr + mv + (spec%nr + 1)/2
         case (ISA_AARCH64_AMX)
             count = mv*(spec%nr/8)
+        case (ISA_WASM32_SIMD128)
+            count = mv*spec%nr + mv + 1
         case default
             count = 0
         end select
@@ -154,7 +167,7 @@ contains
             message = 'k unroll must lie in 1..16'
         else if (spec%prefetch_a < 0) then
             message = 'prefetch distance must not be negative'
-        else if (spec%isa < ISA_X86_64_AVX2_FMA .or. spec%isa > ISA_AARCH64_AMX) then
+        else if (spec%isa < ISA_X86_64_AVX2_FMA .or. spec%isa > ISA_WASM32_SIMD128) then
             message = 'unknown instruction set'
         else
             width = isa_vector_doubles(spec%isa)
@@ -199,6 +212,9 @@ contains
         case (ISA_AARCH64_AMX)
             guard = 'defined(__aarch64__) && defined(__APPLE__)'
             body = amx_body(spec)
+        case (ISA_WASM32_SIMD128)
+            guard = 'defined(__wasm32__) && defined(__wasm_simd128__)'
+            body = wasm_body(spec)
         end select
         call add(source, '/* '//spec%name//': '//isa_name(spec%isa)//' tile '//itoa(spec%mr)//'x'// &
             itoa(spec%nr)//', k unrolled '//itoa(spec%k_unroll)//'. */')
@@ -231,12 +247,20 @@ contains
         end if
         call add(source, '__asm__(')
         call add(source, '    ".text\n"')
-        call add(source, '    ".p2align 5\n"')
-        call add(source, '    ".globl " FG_SYM('//spec%name//') "\n"')
-        call add(source, '    FG_TYPE('//spec%name//')')
-        call add(source, '    FG_SYM('//spec%name//') ":\n"')
-        source = source//body
-        call add(source, '    FG_SIZE('//spec%name//')')
+        if (spec%isa == ISA_WASM32_SIMD128) then
+            ! no alignment or size directives for wasm functions
+            call add(source, '    ".globl '//spec%name//'\n"')
+            call add(source, '    ".type '//spec%name//',@function\n"')
+            call add(source, '    "'//spec%name//':\n"')
+            source = source//body
+        else
+            call add(source, '    ".p2align 5\n"')
+            call add(source, '    ".globl " FG_SYM('//spec%name//') "\n"')
+            call add(source, '    FG_TYPE('//spec%name//')')
+            call add(source, '    FG_SYM('//spec%name//') ":\n"')
+            source = source//body
+            call add(source, '    FG_SIZE('//spec%name//')')
+        end if
         call add(source, ');')
         call add(source, '#endif')
     end function emit_tile_kernel_c_asm
@@ -776,6 +800,236 @@ contains
         end subroutine steps
 
     end function amx_body
+
+    ! wasm32: a stack machine whose locals the engine maps to registers. The
+    ! parameters are (k, a, b, acc), (k, a, b, c, ldc), (k, a, lda, b, c, ldc)
+    ! or (k, a, b, ldb, c, ldc), with k and the leading dimensions as i64 and
+    ! the pointers as i32. Locals hold the counters, then accumulator (v, j)
+    ! at acc0 + v + mv*j, the A vectors and the broadcast of B. A product is a
+    ! multiply and an add: fused multiply-add exists only in relaxed SIMD, and
+    ! JavaScriptCore as released with macOS 26.6, the engine of every browser
+    ! on the iPad, refuses to compile a module that uses it.
+    function wasm_body(spec) result(text)
+        type(tile_kernel_spec_t), intent(in) :: spec
+        character(:), allocatable :: text, types, locals
+        integer :: mv, nacc, np, pa, pb, pout, pld, nmain, ntail, acc0, av0, bs, extra
+        integer :: lda_b, col0, ldc_b, cp, v, j, i
+
+        mv = spec%mr/2
+        nacc = mv*spec%nr
+        text = ''
+        pld = -1
+        if (spec%a_strided) then
+            types = 'i64, i32, i64, i32, i32, i64'
+            pa = 1
+            pb = 3
+            pout = 4
+            pld = 5
+        else if (spec%b_strided) then
+            types = 'i64, i32, i32, i64, i32, i64'
+            pa = 1
+            pb = 2
+            pout = 4
+            pld = 5
+        else if (spec%update_c) then
+            types = 'i64, i32, i32, i32, i64'
+            pa = 1
+            pb = 2
+            pout = 3
+            pld = 4
+        else
+            types = 'i64, i32, i32, i32'
+            pa = 1
+            pb = 2
+            pout = 3
+        end if
+        np = 1
+        do i = 1, len(types)
+            if (types(i:i) == ',') np = np + 1
+        end do
+        nmain = np
+        ntail = np + 1
+        acc0 = np + 2
+        av0 = acc0 + nacc
+        bs = av0 + mv
+        extra = bs + 1
+        locals = 'i32, i32'
+        do i = 1, nacc + mv + 1
+            locals = locals//', v128'
+        end do
+        lda_b = -1
+        col0 = -1
+        ldc_b = -1
+        cp = -1
+        if (spec%a_strided) then
+            lda_b = extra
+            extra = extra + 1
+            locals = locals//', i32'
+        end if
+        if (spec%b_strided) then
+            ! byte offset of column j of B from column 0, for j = 1 .. nr-1
+            col0 = extra
+            extra = extra + spec%nr - 1
+            do j = 1, spec%nr - 1
+                locals = locals//', i32'
+            end do
+        end if
+        if (spec%update_c) then
+            ldc_b = extra
+            cp = extra + 1
+            extra = extra + 2
+            locals = locals//', i32, i32'
+        end if
+
+        call asm(text, '.functype '//spec%name//' ('//types//') -> ()')
+        call asm(text, '.local '//locals)
+        ! the accumulators start at zero like every wasm local
+        call asm(text, 'local.get 0')
+        call asm(text, 'i32.wrap_i64')
+        call asm(text, 'local.set '//itoa(ntail))
+        call asm(text, 'local.get '//itoa(ntail))
+        call asm(text, 'i32.const '//itoa(spec%k_unroll))
+        call asm(text, 'i32.div_u')
+        call asm(text, 'local.set '//itoa(nmain))
+        call asm(text, 'local.get '//itoa(ntail))
+        call asm(text, 'i32.const '//itoa(spec%k_unroll))
+        call asm(text, 'i32.rem_u')
+        call asm(text, 'local.set '//itoa(ntail))
+        if (spec%a_strided) call bytes(text, 2, lda_b)
+        if (spec%b_strided) then
+            call bytes(text, 3, col0)
+            do j = 2, spec%nr - 1
+                call asm(text, 'local.get '//itoa(col0 + j - 2))
+                call asm(text, 'local.get '//itoa(col0))
+                call asm(text, 'i32.add')
+                call asm(text, 'local.set '//itoa(col0 + j - 1))
+            end do
+        end if
+        call counted_loop(text, nmain, spec%k_unroll)
+        call counted_loop(text, ntail, 1)
+        if (spec%update_c) then
+            call bytes(text, pld, ldc_b)
+            call asm(text, 'local.get '//itoa(pout))
+            call asm(text, 'local.set '//itoa(cp))
+            do j = 0, spec%nr - 1
+                do v = 0, mv - 1
+                    call asm(text, 'local.get '//itoa(cp))
+                    call asm(text, 'local.get '//itoa(cp))
+                    call asm(text, 'v128.load '//itoa(16*v)//':p2align=3')
+                    call asm(text, 'local.get '//itoa(acc0 + v + mv*j))
+                    call asm(text, 'f64x2.add')
+                    call asm(text, 'v128.store '//itoa(16*v)//':p2align=3')
+                end do
+                if (j < spec%nr - 1) then
+                    call asm(text, 'local.get '//itoa(cp))
+                    call asm(text, 'local.get '//itoa(ldc_b))
+                    call asm(text, 'i32.add')
+                    call asm(text, 'local.set '//itoa(cp))
+                end if
+            end do
+        else
+            do j = 0, spec%nr - 1
+                do v = 0, mv - 1
+                    call asm(text, 'local.get '//itoa(pout))
+                    call asm(text, 'local.get '//itoa(acc0 + v + mv*j))
+                    call asm(text, 'v128.store '//itoa(8*(spec%mr*j + 2*v))//':p2align=3')
+                end do
+            end do
+        end if
+        call asm(text, 'end_function')
+
+    contains
+
+        ! local dst = 8 * (i32) local src
+        subroutine bytes(t, src, dst)
+            character(:), allocatable, intent(inout) :: t
+            integer, intent(in) :: src, dst
+            call asm(t, 'local.get '//itoa(src))
+            call asm(t, 'i32.wrap_i64')
+            call asm(t, 'i32.const 3')
+            call asm(t, 'i32.shl')
+            call asm(t, 'local.set '//itoa(dst))
+        end subroutine bytes
+
+        ! counter times: count steps, then the pointers advance
+        subroutine counted_loop(t, counter, count)
+            character(:), allocatable, intent(inout) :: t
+            integer, intent(in) :: counter, count
+            call asm(t, 'block')
+            call asm(t, 'local.get '//itoa(counter))
+            call asm(t, 'i32.eqz')
+            call asm(t, 'br_if 0')
+            call asm(t, 'loop')
+            call steps(t, count)
+            if (.not. spec%a_strided) call advance(t, pa, count*spec%mr*8)
+            call advance(t, pb, count*8*merge(1, spec%nr, spec%b_strided))
+            call asm(t, 'local.get '//itoa(counter))
+            call asm(t, 'i32.const 1')
+            call asm(t, 'i32.sub')
+            call asm(t, 'local.tee '//itoa(counter))
+            call asm(t, 'br_if 0')
+            call asm(t, 'end_loop')
+            call asm(t, 'end_block')
+        end subroutine counted_loop
+
+        subroutine advance(t, ptr, nbytes)
+            character(:), allocatable, intent(inout) :: t
+            integer, intent(in) :: ptr, nbytes
+            call asm(t, 'local.get '//itoa(ptr))
+            call asm(t, 'i32.const '//itoa(nbytes))
+            call asm(t, 'i32.add')
+            call asm(t, 'local.set '//itoa(ptr))
+        end subroutine advance
+
+        subroutine steps(t, count)
+            character(:), allocatable, intent(inout) :: t
+            integer, intent(in) :: count
+            integer :: s, vv, jj
+            do s = 0, count - 1
+                do vv = 0, mv - 1
+                    call asm(t, 'local.get '//itoa(pa))
+                    if (spec%a_strided) then
+                        call asm(t, 'v128.load '//itoa(16*vv)//':p2align=3')
+                    else
+                        call asm(t, 'v128.load '//itoa(8*(s*spec%mr + 2*vv))//':p2align=3')
+                    end if
+                    call asm(t, 'local.set '//itoa(av0 + vv))
+                end do
+                if (spec%a_strided) call advance_by_local(t, pa, lda_b)
+                do jj = 0, spec%nr - 1
+                    call asm(t, 'local.get '//itoa(pb))
+                    if (spec%b_strided) then
+                        if (jj > 0) then
+                            call asm(t, 'local.get '//itoa(col0 + jj - 1))
+                            call asm(t, 'i32.add')
+                        end if
+                        call asm(t, 'v128.load64_splat '//itoa(8*s)//':p2align=3')
+                    else
+                        call asm(t, 'v128.load64_splat '//itoa(8*(s*spec%nr + jj))//':p2align=3')
+                    end if
+                    call asm(t, 'local.set '//itoa(bs))
+                    do vv = 0, mv - 1
+                        call asm(t, 'local.get '//itoa(acc0 + vv + mv*jj))
+                        call asm(t, 'local.get '//itoa(av0 + vv))
+                        call asm(t, 'local.get '//itoa(bs))
+                        call asm(t, 'f64x2.mul')
+                        call asm(t, 'f64x2.add')
+                        call asm(t, 'local.set '//itoa(acc0 + vv + mv*jj))
+                    end do
+                end do
+            end do
+        end subroutine steps
+
+        subroutine advance_by_local(t, ptr, step)
+            character(:), allocatable, intent(inout) :: t
+            integer, intent(in) :: ptr, step
+            call asm(t, 'local.get '//itoa(ptr))
+            call asm(t, 'local.get '//itoa(step))
+            call asm(t, 'i32.add')
+            call asm(t, 'local.set '//itoa(ptr))
+        end subroutine advance_by_local
+
+    end function wasm_body
 
     ! Local labels are written .Lname in the emitters and spelled through
     ! FG_L, because ELF assemblers want .L and Mach-O assemblers L.

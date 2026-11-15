@@ -129,6 +129,40 @@ program test_tile_kernel
     call require(.not. ok, 'AMX cannot read B unpacked')
     s%b_strided = .false.
 
+    s%isa = ISA_WASM32_SIMD128
+    s%mr = 10
+    s%nr = 6
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(.not. ok .and. index(msg, 'registers') > 0, 'wasm 10x6 needs 36 of 32 locals')
+    s%mr = 8
+    s%nr = 4
+    s%k_unroll = 4
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(ok .and. tile_register_count(s) == 21, 'wasm 8x4')
+    call require(index(src, '.functype k (i64, i32, i32, i32) -> ()') > 0, 'wasm signature (k, a, b, acc)')
+    ! 4 steps in the main loop and one in the tail, 16 products each; no
+    ! relaxed-SIMD fused multiply-add, which Safari's engine rejects
+    call require(count_of(src, 'f64x2.mul') == 5*16 .and. count_of(src, 'f64x2.add') == 5*16, &
+        'wasm multiply and add per product')
+    call require(count_of(src, 'relaxed') == 0, 'wasm without relaxed SIMD')
+    call require(count_of(src, 'v128.load64_splat') == 5*4, 'wasm one broadcast per B element')
+    call require(count_of(src, 'v128.store') == 16, 'wasm stores the whole tile')
+    call require(index(src, 'defined(__wasm_simd128__)') > 0 .and. count_of(src, 'FG_SIZE(') == 2 .and. &
+        index(src, '.p2align') == 0, 'wasm kernel only with SIMD128, without size or alignment directives')
+    call require(count_of(src, 'end_function') == 1, 'wasm function closed')
+    s%update_c = .true.
+    s%b_strided = .true.
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(ok .and. index(src, '.functype k (i64, i32, i32, i64, i32, i64) -> ()') > 0 .and. &
+        count_of(src, 'f64x2.add') == 5*16 + 16, 'wasm unpacked B added to C')
+    s%b_strided = .false.
+    s%a_strided = .true.
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(ok .and. index(src, '.functype k (i64, i32, i64, i32, i32, i64) -> ()') > 0, &
+        'wasm unpacked A')
+    s%a_strided = .false.
+    s%update_c = .false.
+
     s%isa = 99
     src = emit_tile_kernel_c_asm(s, ok, msg)
     call require(.not. ok .and. index(msg, 'unknown') > 0, 'unknown instruction set rejected')
