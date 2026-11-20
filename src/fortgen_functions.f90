@@ -17,7 +17,7 @@ contains
                 "exp", "log", "log10", "sqrt", "abs", "erf", "erfc", &
                 "gamma", "loggamma", "max", "min", "Min", "Max", &
                 "besselj", "bessely", "besseli", "besselk", &
-                "elliptic_k", "elliptic_e")
+                "elliptic_k", "elliptic_e", "elliptic_k_log_a", "elliptic_k_log_b")
             ok = .true.
         case default
             ok = select_function(name)
@@ -39,7 +39,8 @@ contains
             name == "Max") then
             ok = n >= 2
         else if (name == "atan2" .or. name == "besselj" .or. &
-                name == "bessely" .or. name == "besseli" .or. name == "besselk") then
+                name == "bessely" .or. name == "besseli" .or. name == "besselk" &
+                .or. name == "elliptic_k_log_a" .or. name == "elliptic_k_log_b") then
             ok = n == 2
         else if (select_function(name)) then
             ok = n == 4
@@ -51,22 +52,27 @@ contains
     pure logical function fortran_function_uses_special(name) result(ok)
         character(*), intent(in) :: name
         ok = name == "besseli" .or. name == "besselk" .or. &
-            name == "elliptic_k" .or. name == "elliptic_e"
+            name == "elliptic_k" .or. name == "elliptic_e" .or. &
+            name == "elliptic_k_log_a" .or. name == "elliptic_k_log_b"
     end function fortran_function_uses_special
 
     pure function fortran_function_spelling(name) result(text)
         character(*), intent(in) :: name
         character(:), allocatable :: text
+        ! Complete elliptic integrals in the parameter convention m = k**2,
+        ! as provided by fortnum_special (ellip_k, ellip_e), and the n-th
+        ! q-derivatives of A_K, B_K in K(1-q) = -ln(q) A_K/2 + B_K, called
+        ! (n, q) as in fortnum_special.
         select case (name)
         case ("loggamma"); text = "log_gamma"
         case ("besselj");  text = "bessel_jn"
         case ("bessely");  text = "bessel_yn"
         case ("besseli");  text = "bessel_in"
         case ("besselk");  text = "bessel_kn"
-        ! Complete elliptic integrals in the parameter convention m = k**2,
-        ! as provided by fortnum_special (ellip_k, ellip_e).
         case ("elliptic_k"); text = "ellip_k"
         case ("elliptic_e"); text = "ellip_e"
+        case ("elliptic_k_log_a"); text = "ellip_k_log_a"
+        case ("elliptic_k_log_b"); text = "ellip_k_log_b"
         case ("Min");      text = "min"
         case ("Max");      text = "max"
         case default;      text = name

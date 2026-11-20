@@ -880,8 +880,9 @@ contains
         type(kernel_ir_t), intent(in) :: ir
         type(kernel_emit_spec_t), intent(in) :: spec
         ! Special heads in the fixed order of the emitted only-list.
-        character(len=10), parameter :: heads(4) = [character(len=10) :: &
-            "besseli", "besselk", "elliptic_k", "elliptic_e"]
+        character(len=16), parameter :: heads(6) = [character(len=16) :: &
+            "besseli", "besselk", "elliptic_k", "elliptic_e", &
+            "elliptic_k_log_a", "elliptic_k_log_b"]
         logical :: used(size(heads)), first
         integer :: k, j
         character(:), allocatable :: module_name
@@ -1112,7 +1113,7 @@ contains
                 if (backend == BACKEND_FORTRAN .and. &
                     integer_order_function(chars(ir%nodes(k)%name))) then
                     if (.not. literal_integer(ir, ir%operands(first), order_value)) then
-                        message = "kernel emitter: Bessel order must be an integer literal"
+                        message = "kernel emitter: function order must be an integer literal"
                         return
                     end if
                 end if
@@ -1824,7 +1825,8 @@ contains
         character(*), intent(in) :: name
 
         ok = name == "besselj" .or. name == "bessely" .or. &
-            name == "besseli" .or. name == "besselk"
+            name == "besseli" .or. name == "besselk" .or. &
+            name == "elliptic_k_log_a" .or. name == "elliptic_k_log_b"
     end function integer_order_function
 
     logical function has_special_function(ir) result(found)

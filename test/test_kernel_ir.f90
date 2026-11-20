@@ -87,8 +87,62 @@ program test_kernel_ir
 
     call check_long_statements_continue()
     call check_elliptic_special_use()
+    call check_elliptic_log_piece_use()
 
 contains
+
+    subroutine check_elliptic_log_piece_use()
+        !! The n-th derivatives of the log-split pieces of K are fortnum_special
+        !! entry points ellip_k_log_a(n, q), ellip_k_log_b(n, q): the order
+        !! stays an integer literal, and a non-integer order is refused.
+        type(kernel_ir_t) :: lp
+        type(kernel_emit_spec_t) :: lp_spec
+        type(str_t) :: text
+
+        call kernel_ir_allocate(lp, 4, 4, 2)
+        lp%nodes(1)%operation = IR_SYMBOL
+        lp%nodes(1)%name = str("q")
+        lp%nodes(2)%operation = IR_LITERAL
+        lp%nodes(2)%value = 2.0d0
+        lp%nodes(3)%operation = IR_FUNCTION
+        lp%nodes(3)%name = str("elliptic_k_log_a")
+        lp%nodes(3)%first_operand = 1
+        lp%nodes(3)%n_operands = 2
+        lp%nodes(4)%operation = IR_FUNCTION
+        lp%nodes(4)%name = str("elliptic_k_log_b")
+        lp%nodes(4)%first_operand = 3
+        lp%nodes(4)%n_operands = 2
+        lp%operands = [2, 1, 2, 1]
+        lp%outputs = [3, 4]
+        allocate(lp_spec%args(1), lp_spec%outputs(2))
+        lp_spec%name = str("log_piece_leaf")
+        lp_spec%args = [str("q")]
+        lp_spec%outputs = [str("a2"), str("b2")]
+        lp_spec%temp_prefix = str("t")
+        lp_spec%target = TARGET_FORTRAN_CPU
+        lp_spec%producer = str("fortgen")
+        lp_spec%generator = str("test_kernel_ir")
+        lp_spec%regenerate_command = str("fpm test")
+
+        text = emit_fortran_kernel_ir(lp, lp_spec, ok, message)
+        call require(ok, message)
+        call require(index(chars(text), &
+            "use fortnum_special, only: ellip_k_log_a, ellip_k_log_b") > 0, &
+            "log-piece leaf does not import fortnum_special")
+        call require(index(chars(text), "ellip_k_log_a(2, q)") > 0, &
+            "missing ellip_k_log_a(2, q)")
+        call require(index(chars(text), "ellip_k_log_b(2, q)") > 0, &
+            "missing ellip_k_log_b(2, q)")
+
+        lp%nodes(2)%value = 1.5d0
+        text = emit_fortran_kernel_ir(lp, lp_spec, ok, message)
+        call require(.not. ok, "a non-integer order was emitted")
+
+        lp%nodes(2)%value = 2.0d0
+        lp_spec%target = TARGET_CUDA
+        text = emit_cuda_device_ir(lp, lp_spec, ok, message)
+        call require(.not. ok, "CUDA accepted a log piece of K")
+    end subroutine check_elliptic_log_piece_use
 
     subroutine check_elliptic_special_use()
         !! Complete elliptic integrals K(m), E(m) are fortnum_special entry
