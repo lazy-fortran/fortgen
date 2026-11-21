@@ -1,14 +1,19 @@
 /* Runs one emitted tile kernel (TILE_NAME, TILE_MR x TILE_NR) against a
    direct sum for several k, including k = 0 and every unroll remainder. With
    TILE_UPDATE_C the kernel adds the tile to C (leading dimension MR + 3) and
-   must leave the padding rows alone.
+   must leave the padding rows alone. With TILE_TRSM the kernel solves the
+   lower triangle T (inverted diagonal) against C - A B^T and also stores the
+   transposed solution in a packed panel.
    Exit 77 (skipped) when the CPU lacks the kernel's instruction set. */
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#if defined(TILE_A_STRIDED)
+#if defined(TILE_TRSM)
+void TILE_NAME(int64_t k, const double *a, const double *b, double *c, int64_t ldc,
+               const double *t, double *pb);
+#elif defined(TILE_A_STRIDED)
 void TILE_NAME(int64_t k, const double *a, int64_t lda, const double *b, double *c, int64_t ldc);
 #elif defined(TILE_B_STRIDED)
 void TILE_NAME(int64_t k, const double *a, const double *b, int64_t ldb, double *c, int64_t ldc);
@@ -87,7 +92,52 @@ int main(void) {
                     ref[i + MR * j] += a[i + LDA * p] * BAT(p, j);
                     scale[i + MR * j] += fabs(a[i + LDA * p] * BAT(p, j));
                 }
-#if defined(TILE_UPDATE_C)
+#if defined(TILE_TRSM)
+        enum { LDC = MR + 3 };
+        double c[LDC * NR], t[MR * MR], pb[NR * MR], r[MR * NR], err[MR * NR];
+        for (int j = 0; j < NR; j++)
+            for (int i = 0; i < LDC; i++) c[i + LDC * j] = 0.25 * i - 0.5 * j;
+        for (int j = 0; j < MR; j++)
+            for (int i = 0; i < MR; i++)
+                t[i + MR * j] = i < j ? 0.0 : (i == j ? 1.0 / (2.0 + i) : 0.3 * sin(i + 5.0 * j));
+        /* reference: R = C - A B^T, then forward substitution; err bounds the
+           rounding of each step by the absolute sums */
+        for (int j = 0; j < NR; j++)
+            for (int i = 0; i < MR; i++) {
+                r[i + MR * j] = c[i + LDC * j] - ref[i + MR * j];
+                err[i + MR * j] = fabs(c[i + LDC * j]) + scale[i + MR * j];
+            }
+        for (int ii = 0; ii < MR; ii++)
+            for (int j = 0; j < NR; j++) {
+                const double x = r[ii + MR * j] * t[ii + MR * ii];
+                r[ii + MR * j] = x;
+                err[ii + MR * j] *= fabs(t[ii + MR * ii]);
+                for (int i = ii + 1; i < MR; i++) {
+                    r[i + MR * j] -= t[i + MR * ii] * x;
+                    err[i + MR * j] += fabs(t[i + MR * ii]) * err[ii + MR * j];
+                }
+            }
+        TILE_NAME(k, a, b, c, LDC, t, pb);
+        for (int j = 0; j < NR; j++) {
+            for (int i = MR; i < LDC; i++)
+                if (c[i + LDC * j] != 0.25 * i - 0.5 * j) {
+                    printf("k = %d: padding row %d of column %d changed\n", k, i, j);
+                    return 1;
+                }
+            for (int i = 0; i < MR; i++) {
+                const double tol = 8.0 * (k + MR + 1) * 1.2e-16 * err[i + MR * j];
+                if (!(fabs(c[i + LDC * j] - r[i + MR * j]) <= tol) ||
+                    pb[j + NR * i] != c[i + LDC * j]) {
+                    printf("k = %d, row %d, column %d: %.17g (panel %.17g), expected %.17g\n",
+                           k, i, j, c[i + LDC * j], pb[j + NR * i], r[i + MR * j]);
+                    return 1;
+                }
+            }
+        }
+        free(a);
+        free(b);
+        continue;
+#elif defined(TILE_UPDATE_C)
         enum { LDC = MR + 3 };
         double c[LDC * NR];
         for (int j = 0; j < NR; j++)

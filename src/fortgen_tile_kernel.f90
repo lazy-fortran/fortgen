@@ -25,6 +25,12 @@ module fortgen_tile_kernel
     ! With b_strided, B is read unpacked from a column-major matrix:
     !     void name(int64_t k, const double *a, const double *b, int64_t ldb,
     !               double *c_or_acc, int64_t ldc);
+    ! With trsm (x86_64 AVX2), the kernel of a triangular solve: R = C - A B^T,
+    ! then R := inv(T) R with T(mr, mr) lower triangular, column-major, its
+    ! diagonal stored inverted and zeros above it; R is stored to C and its
+    ! transpose to the packed panel pb(nr, mr):
+    !     void name(int64_t k, const double *a, const double *b, double *c,
+    !               int64_t ldc, const double *t, double *pb);
     ! aarch64_amx targets the matrix coprocessor of Apple M1 to M3: the tile
     ! lives in its Z registers instead of vector registers (see amx_body).
     ! wasm32_simd128 is WebAssembly with 128-bit SIMD, for browsers and node
@@ -65,6 +71,8 @@ module fortgen_tile_kernel
         !> Read B unpacked from a column-major matrix with leading dimension
         !> ldb (one row of the tile's columns per step of k); A stays packed.
         logical :: b_strided = .false.
+        !> Triangular-solve kernel (see the module comment); x86_64 AVX2.
+        logical :: trsm = .false.
     end type tile_kernel_spec_t
 
 contains
@@ -181,6 +189,9 @@ contains
                 message = 'aarch64_amx loads B rows of 8 contiguous doubles; it cannot read B unpacked'
             else if (tile_register_count(spec) > isa_vector_registers(spec%isa)) then
                 message = 'tile needs more vector registers than '//isa_name(spec%isa)//' has'
+            else if (spec%trsm .and. (spec%isa /= ISA_X86_64_AVX2_FMA .or. spec%update_c .or. &
+                    spec%a_strided .or. spec%b_strided)) then
+                message = 'trsm kernels are x86_64_avx2_fma with packed A and B and no C update'
             else if (spec%a_strided .and. spec%b_strided) then
                 message = 'A and B cannot both be read unpacked'
             else if (spec%b_strided .and. spec%nr > merge(6, 9, spec%isa == ISA_AARCH64_NEON)) then
@@ -234,7 +245,10 @@ contains
             merge('%function', '@function', spec%isa >= ISA_AARCH64_NEON)//'\n"')
         call add(source, '#define FG_SIZE(name) ".size " #name ", .-" #name "\n"')
         call add(source, '#endif')
-        if (spec%a_strided) then
+        if (spec%trsm) then
+            call add(source, 'void '//spec%name//'(int64_t k, const double *a, const double *b, double *c, '// &
+                'int64_t ldc, const double *t, double *pb);')
+        else if (spec%a_strided) then
             call add(source, 'void '//spec%name//'(int64_t k, const double *a, int64_t lda, const double *b, '// &
                 'double *'//merge('c  ', 'acc', spec%update_c)//', int64_t ldc);')
         else if (spec%b_strided) then
@@ -282,9 +296,27 @@ contains
         r = merge('%zmm', '%ymm', wide)
         lab = spec%name
         text = ''
-        do v = 0, nacc - 1
-            call asm(text, 'vxorpd '//reg(v)//', '//reg(v)//', '//reg(v))
-        end do
+        if (spec%trsm) then
+            ! (k, a, b, c, ldc, t, pb) in (rdi, rsi, rdx, rcx, r8, r9, stack):
+            ! t in r12, pb in r13, ldc in bytes in r11; the tile starts as C
+            call asm(text, 'push %r12')
+            call asm(text, 'push %r13')
+            call asm(text, 'mov %r9, %r12')
+            call asm(text, 'mov 24(%rsp), %r13')
+            call asm(text, 'mov %r8, %r11')
+            call asm(text, 'shl $3, %r11')
+            call asm(text, 'mov %rcx, %rax')
+            do j = 0, spec%nr - 1
+                do v = 0, mv - 1
+                    call asm(text, 'vmovupd '//itoa(bytes*v)//'(%rax), '//reg(v + mv*j))
+                end do
+                if (j < spec%nr - 1) call asm(text, 'add %r11, %rax')
+            end do
+        else
+            do v = 0, nacc - 1
+                call asm(text, 'vxorpd '//reg(v)//', '//reg(v)//', '//reg(v))
+            end do
+        end if
         if (spec%b_strided) then
             ! (k, a, b, ldb, c, ldc) in (rdi, rsi, rdx, rcx, r8, r9): ldb bytes in
             ! r12; column groups 0-2, 3-5, 6-8 of B from rdx, r13, r14
@@ -338,7 +370,9 @@ contains
         call asm(text, 'dec %r9')
         call asm(text, 'jnz .L'//lab//'_one')
         call label(text, '.L'//lab//'_store')
-        if (spec%update_c) then
+        if (spec%trsm) then
+            call solve_tile(text)
+        else if (spec%update_c) then
             ! C(:, j) += tile(:, j), column pointer in rax, ldc in bytes in r11
             call asm(text, 'shl $3, %r11')
             call asm(text, 'mov %rcx, %rax')
@@ -357,6 +391,10 @@ contains
             end do
         end if
         call asm(text, 'vzeroupper')
+        if (spec%trsm) then
+            call asm(text, 'pop %r13')
+            call asm(text, 'pop %r12')
+        end if
         if (spec%b_strided) then
             call asm(text, 'pop %r14')
             call asm(text, 'pop %r13')
@@ -365,6 +403,45 @@ contains
         call asm(text, 'ret')
 
     contains
+
+        ! R := inv(T) R in the tile, row ii of R in lane mod(ii, 4) of
+        ! accumulator ii/4 of each column: the row is broadcast from its
+        ! lane, scaled by the inverted diagonal, subtracted from the rows
+        ! below by T's column (zero above the diagonal) and blended back into
+        ! its lane. R goes to C and, transposed, to pb(nr, mr).
+        subroutine solve_tile(t)
+            character(:), allocatable, intent(inout) :: t
+            integer :: ii, hv, lane, jj, vv
+            character(:), allocatable :: d, x
+            d = reg(nacc)
+            x = reg(nacc + 1)
+            do ii = 0, spec%mr - 1
+                hv = ii/width
+                lane = mod(ii, width)
+                call asm(t, 'vbroadcastsd '//itoa(8*(ii*spec%mr + ii))//'(%r12), '//d)
+                do jj = 0, spec%nr - 1
+                    call asm(t, 'vpermpd $'//itoa(85*lane)//', '//reg(hv + mv*jj)//', '//x)
+                    call asm(t, 'vmulpd '//d//', '//x//', '//x)
+                    do vv = hv, mv - 1
+                        call asm(t, 'vfnmadd231pd '//itoa(8*(ii*spec%mr) + bytes*vv)//'(%r12), '//x// &
+                            ', '//reg(vv + mv*jj))
+                    end do
+                    call asm(t, 'vblendpd $'//itoa(2**lane)//', '//x//', '//reg(hv + mv*jj)//', '// &
+                        reg(hv + mv*jj))
+                end do
+            end do
+            call asm(t, 'mov %rcx, %rax')
+            do jj = 0, spec%nr - 1
+                do vv = 0, mv - 1
+                    call asm(t, 'vmovupd '//reg(vv + mv*jj)//', '//itoa(bytes*vv)//'(%rax)')
+                end do
+                do ii = 0, spec%mr - 1
+                    call asm(t, 'vmovsd '//itoa(8*ii)//'(%rax), %xmm15')
+                    call asm(t, 'vmovsd %xmm15, '//itoa(8*(jj + spec%nr*ii))//'(%r13)')
+                end do
+                if (jj < spec%nr - 1) call asm(t, 'add %r11, %rax')
+            end do
+        end subroutine solve_tile
 
         ! B moves on by count steps: one row of a packed panel, or 8 bytes in
         ! each column group of an unpacked B
@@ -428,8 +505,8 @@ contains
                         ! with mv = 1 broadcasts from memory inside the FMA instead
                         call asm(t, 'vbroadcastsd '//baddr(s, jj)//', '//reg(nacc + mv))
                         do vv = 0, mv - 1
-                            call asm(t, 'vfmadd231pd '//reg(nacc + mv)//', '//reg(nacc + vv)//', '// &
-                                reg(vv + mv*jj))
+                            call asm(t, trim(merge('vfnmadd231pd', 'vfmadd231pd ', spec%trsm))//' '// &
+                                reg(nacc + mv)//', '//reg(nacc + vv)//', '//reg(vv + mv*jj))
                         end do
                     end if
                 end do

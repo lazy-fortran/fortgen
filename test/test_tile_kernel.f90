@@ -52,6 +52,18 @@ program test_tile_kernel
         count_of(src, ',%r12,') == 4*5 + 2, 'strided B: column groups by scaled ldb, callee-saved kept')
     s%b_strided = .false.
     s%update_c = .false.
+    s%trsm = .true.
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(ok .and. count_of(src, 'vfnmadd231pd') == 5*12 + 6*(4*2 + 4*1) .and. &
+        count_of(src, 'vblendpd') == 8*6 .and. count_of(src, 'vpermpd') == 8*6 .and. &
+        index(src, 'double *pb') > 0, 'AVX2 trsm: subtracting product, one solve step per element')
+    call require(index(src, 'mov 24(%rsp), %r13') > 0 .and. index(src, 'pop %r12') > 0, &
+        'trsm: seventh argument from the stack, callee-saved registers kept')
+    s%update_c = .true.
+    src = emit_tile_kernel_c_asm(s, ok, msg)
+    call require(.not. ok .and. index(msg, 'trsm') > 0, 'trsm does not combine with a C update')
+    s%update_c = .false.
+    s%trsm = .false.
 
     s%isa = ISA_X86_64_AVX512
     s%mr = 24
